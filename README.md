@@ -11,7 +11,7 @@ A CLI tool that, given only a domain, scans it for:
   buckets that tool reports. See [Passive Link & Secret Discovery](#passive-link-path--secret-discovery-link_finderpy)
   below for full details.
 
-Built as a part of a graduation project at DEPI. See [`LEGAL.md`](./LEGAL.md) before using this against any target.
+See [`LEGAL.md`](./LEGAL.md) before using this against any target.
 
 ## Install
 
