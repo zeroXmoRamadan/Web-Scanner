@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Callable, Optional
 
 from asfoor.core.models import ScanReport, TechWithCVEs
@@ -44,6 +45,8 @@ async def run_scan(domain: str, config: dict,
                     skip_ports: bool = False, skip_dirs: bool = False, skip_cve: bool = False,
                     skip_links: bool = False,
                     port_override: str | None = None, full_ports: bool = False,
+                    dirs_wordlist_path: Path | None = None,
+                    sensitive_wordlist_path: Path | None = None,
                     on_phase: Optional[PhaseCallback] = None) -> ScanReport:
     notify = on_phase or _noop_notify
 
@@ -60,7 +63,7 @@ async def run_scan(domain: str, config: dict,
     tasks["fingerprint"] = _run_phase("technology fingerprinting", fingerprint(domain, config), notify)
 
     if not skip_dirs:
-        tasks["dirs"] = _run_phase("active directory & file brute-force", scan_directories(domain, config), notify)
+        tasks["dirs"] = _run_phase("active directory & file brute-force", scan_directories(domain, config, dirs_wordlist_path=dirs_wordlist_path, sensitive_wordlist_path=sensitive_wordlist_path), notify)
     if not skip_links:
         tasks["links"] = _run_phase("passive link & secret discovery", find_links(domain, config), notify)
     if not skip_ports:

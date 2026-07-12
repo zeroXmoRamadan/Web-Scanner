@@ -81,29 +81,66 @@ If you don't pass either flag, the tool asks `Export report files (...) to '<out
 right after printing the console report. In `--quiet` mode there's no prompt — the default is
 not to write files, so nothing is created unless you explicitly pass `--export`.
 
-### Common options
+## CLI Options & Flags
 
-```bash
-# Full 65535-port scan instead of top 1000
-3asfoor scan example.com --i-have-permission --full-ports
+Below is the complete list of CLI arguments, options, and flags available when running `3asfoor scan`:
 
-# Custom port range
-3asfoor scan example.com --i-have-permission --ports "80,443,8080-8100"
+### Target Argument
 
-# Skip specific modules
-3asfoor scan example.com --i-have-permission --skip-ports
-3asfoor scan example.com --i-have-permission --skip-dirs    # skip active wordlist brute-force
-3asfoor scan example.com --i-have-permission --skip-links   # skip passive FindSomething-style discovery
-3asfoor scan example.com --i-have-permission --skip-cve
+* **`DOMAIN`** (Required)  
+  The target domain to scan (e.g., `example.com`).
 
-# When exporting, choose which file formats to write (default is both)
-3asfoor scan example.com --i-have-permission --export --format json
+### Authorizations & Safety
 
-# Custom output directory (only used if exporting)
-3asfoor scan example.com --i-have-permission --export --output-dir ./my-reports
-```
+* **`--i-have-permission`** (Flag)  
+  Confirm authorization to scan the target. If omitted in non-interactive environments, the tool will abort. In interactive terminals, you will be prompted for confirmation.
 
-Run `3asfoor scan --help` for the full option list.
+### Scope & Target Ports
+* **`--full-ports`** (Flag)  
+  Scans all 65535 TCP ports instead of the default top 1000 ports.
+* **`--ports <spec>`** (Option)  
+  Specifies custom TCP port ranges/specifications to scan (e.g., `--ports "80,443,8080-8090"`).
+
+### Custom Wordlists
+* **`--wordlist <path>`** (Option)  
+  Path to a custom wordlist file for active directory brute-forcing (one path per line). If not provided, the bundled `data/wordlists/common_dirs.txt` is used.
+* **`--sensitive-wordlist <path>`** (Option)  
+  Path to a custom wordlist file for sensitive file discovery (one path per line). If not provided, the bundled `data/wordlists/sensitive_files.txt` is used.
+
+### Performance Tuning
+* **`--concurrency <num>`** (Option)  
+  Max number of parallel HTTP requests during active directory brute-forcing (default: `20`). Higher values scan faster but put more load on the target.
+* **`--rate-limit <seconds>`** (Option)  
+  Minimum delay in seconds between individual directory-scan HTTP requests (supports decimals, e.g., `0.5`). Useful to avoid overwhelming the target server.
+
+### Module Exclusion Flags
+
+* **`--skip-ports`** (Flag)  
+  Skips port scanning and service detection completely.
+- **`--skip-dirs`** (Flag)  
+  Skips active wordlist directory and sensitive file brute-forcing.
+- **`--skip-links`** (Flag)  
+  Skips passive FindSomething-style link, path, and secret extraction.
+- **`--skip-cve`** (Flag)  
+  Skips checking technology versions against NVD CVE database.
+
+### Reports & Export Controls
+
+* **`--export / --no-export`** (Option)  
+  Explicitly force or prevent saving report outputs (`.json`, `.html`, `_findings.txt`) to disk. If left unspecified, you will be asked interactively after a successful scan.
+- **`--format <fmt>`** (Option)  
+  Report output format selection: `json | html | both` (default: `both`).
+- **`--output-dir <dir>`** (Option)  
+  Specify custom output directory where exported report files are saved (default: `./output`).
+
+### Debugging & Output Modes
+
+* **`--verbose`** (Flag)  
+  Enables verbose logging to standard output/logs.
+- **`--quiet`** (Flag)  
+  Enables silent execution mode. Suppresses startup ASCII banners, loading indicators, and interactive prompts (forces `--no-export` unless `--export` is explicitly passed).
+
+---
 
 ## Output
 

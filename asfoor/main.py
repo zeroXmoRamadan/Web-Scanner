@@ -6,6 +6,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -57,9 +58,10 @@ def scan(
     ),
     full_ports: bool = typer.Option(False, "--full-ports", help="Scan all 65535 ports instead of top 1000."),
     ports: Optional[str] = typer.Option(None, "--ports", help='Custom port spec, e.g. "80,443,8080-8090".'),
-    wordlist_size: str = typer.Option("medium", "--wordlist-size", help="small | medium | large (currently uses bundled list regardless of size)."),
+    wordlist: Optional[str] = typer.Option(None, "--wordlist", help="Path to a custom wordlist file for directory brute-forcing (one path per line)."),
+    sensitive_wordlist: Optional[str] = typer.Option(None, "--sensitive-wordlist", help="Path to a custom wordlist file for sensitive file discovery (one path per line)."),
     output_dir: str = typer.Option("./output", "--output-dir", help="Directory reports are written to, if exporting."),
-    threads: Optional[int] = typer.Option(None, "--threads", help="Override concurrency for directory scanning."),
+    concurrency: Optional[int] = typer.Option(None, "--concurrency", help="Max number of parallel requests during directory brute-forcing (default: 20)."),
     rate_limit: Optional[float] = typer.Option(None, "--rate-limit", help="Seconds delay between directory-scan requests."),
     skip_ports: bool = typer.Option(False, "--skip-ports", help="Skip the port scan module."),
     skip_dirs: bool = typer.Option(False, "--skip-dirs", help="Skip the active (wordlist brute-force) directory scan module."),
@@ -102,7 +104,7 @@ def scan(
     overrides = {
         "output.dir": output_dir,
         "output.format": fmt,
-        "dir_scan.concurrency": threads,
+        "dir_scan.concurrency": concurrency,
         "dir_scan.rate_limit_seconds": rate_limit,
     }
     config = merge_overrides(config, overrides)
@@ -119,10 +121,14 @@ def scan(
         elif status == "error":
             console.print(f"[yellow]*[/yellow] {label} failed: {detail}")
 
+    dirs_wordlist_path = Path(wordlist) if wordlist else None
+    sensitive_wordlist_path = Path(sensitive_wordlist) if sensitive_wordlist else None
+
     report = asyncio.run(run_scan(
         clean_domain, config,
         skip_ports=skip_ports, skip_dirs=skip_dirs, skip_cve=skip_cve, skip_links=skip_links,
         port_override=ports, full_ports=full_ports,
+        dirs_wordlist_path=dirs_wordlist_path, sensitive_wordlist_path=sensitive_wordlist_path,
         on_phase=on_phase,
     ))
 
