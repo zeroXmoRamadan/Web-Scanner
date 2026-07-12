@@ -1,0 +1,227 @@
+{
+  "WordPress": {
+    "category": "CMS",
+    "html": ["wp-content/", "wp-includes/"],
+    "meta": {"generator": "WordPress\\s*([0-9.]+)?"},
+    "headers": {}
+  },
+  "Drupal": {
+    "category": "CMS",
+    "html": ["Drupal.settings", "/sites/default/files/"],
+    "meta": {"generator": "Drupal\\s*([0-9.]+)?"},
+    "headers": {"X-Generator": "Drupal\\s*([0-9.]+)?"}
+  },
+  "Joomla": {
+    "category": "CMS",
+    "html": ["/media/jui/", "Joomla!"],
+    "meta": {"generator": "Joomla!\\s*([0-9.]+)?"}
+  },
+  "Magento": {
+    "category": "E-commerce",
+    "html": ["Mage.Cookies", "/skin/frontend/"],
+    "headers": {"X-Magento-Cache-Debug": ".*"}
+  },
+  "Shopify": {
+    "category": "E-commerce",
+    "html": ["cdn.shopify.com", "Shopify.theme"],
+    "headers": {"X-Shopify-Stage": ".*"}
+  },
+  "PHP": {
+    "category": "Programming Language",
+    "headers": {"X-Powered-By": "PHP/([0-9.]+)"},
+    "cookies": ["PHPSESSID"]
+  },
+  "ASP.NET": {
+    "category": "Programming Language",
+    "headers": {"X-Powered-By": "ASP\\.NET", "X-AspNet-Version": "([0-9.]+)"},
+    "cookies": ["ASP.NET_SessionId"]
+  },
+  "Ruby on Rails": {
+    "category": "Web Framework",
+    "headers": {"X-Powered-By": "Phusion Passenger", "Server": "Passenger"},
+    "cookies": ["_rails_session"]
+  },
+  "Express": {
+    "category": "Web Framework",
+    "headers": {"X-Powered-By": "Express"}
+  },
+  "Laravel": {
+    "category": "Web Framework",
+    "cookies": ["laravel_session"],
+    "html": ["csrf-token"]
+  },
+  "Django": {
+    "category": "Web Framework",
+    "cookies": ["csrftoken", "sessionid"],
+    "html": ["__admin_media_prefix__"]
+  },
+  "Flask": {
+    "category": "Web Framework",
+    "cookies": ["session"],
+    "headers": {"Server": "Werkzeug/([0-9.]+)"}
+  },
+  "Apache": {
+    "category": "Web Server",
+    "headers": {"Server": "Apache/([0-9.]+)"}
+  },
+  "Nginx": {
+    "category": "Web Server",
+    "headers": {"Server": "nginx/([0-9.]+)"}
+  },
+  "Microsoft-IIS": {
+    "category": "Web Server",
+    "headers": {"Server": "Microsoft-IIS/([0-9.]+)"}
+  },
+  "LiteSpeed": {
+    "category": "Web Server",
+    "headers": {"Server": "LiteSpeed"}
+  },
+  "Cloudflare": {
+    "category": "CDN",
+    "headers": {"Server": "cloudflare", "CF-Ray": ".*"}
+  },
+  "jQuery": {
+    "category": "JavaScript Library",
+    "script": ["jquery[.-]([0-9.]+)(?:\\.min)?\\.js", "jquery/([0-9.]+)/jquery"]
+  },
+  "React": {
+    "category": "JavaScript Framework",
+    "html": ["data-reactroot", "data-reactid", "__REACT_DEVTOOLS_GLOBAL_HOOK__"],
+    "script": ["react(?:-dom)?[@/]([0-9.]+)"]
+  },
+  "Vue.js": {
+    "category": "JavaScript Framework",
+    "html": ["data-v-app", "__vue__"],
+    "script": ["vue[@/]([0-9.]+)"]
+  },
+  "Angular": {
+    "category": "JavaScript Framework",
+    "html": ["ng-version=\"([0-9.]+)\"", "ng-app"]
+  },
+  "Bootstrap": {
+    "category": "CSS Framework",
+    "script": ["bootstrap[.-]([0-9.]+)(?:\\.min)?\\.js"],
+    "html": ["bootstrap(?:\\.min)?\\.css"]
+  },
+  "Tailwind CSS": {
+    "category": "CSS Framework",
+    "html": ["tailwind(?:\\.min)?\\.css"]
+  },
+  "Google Analytics": {
+    "category": "Analytics",
+    "html": ["google-analytics.com/analytics.js", "gtag\\('config'"]
+  },
+  "Google Tag Manager": {
+    "category": "Tag Manager",
+    "html": ["googletagmanager.com/gtm.js"]
+  },
+  "WooCommerce": {
+    "category": "E-commerce",
+    "html": ["woocommerce", "wc-ajax"]
+  },
+  "Elementor": {
+    "category": "Page Builder",
+    "html": ["elementor", "elementor-frontend"]
+  },
+  "PrestaShop": {
+    "category": "E-commerce",
+    "html": ["PrestaShop"],
+    "meta": {"generator": "PrestaShop"}
+  },
+  "OpenSSL": {
+    "category": "Encryption",
+    "headers": {"Server": "OpenSSL/([0-9.]+)"}
+  },
+  "Varnish": {
+    "category": "Caching",
+    "headers": {"Via": "varnish", "X-Varnish": ".*"}
+  },
+  "PHP-FPM": {
+    "category": "Programming Language",
+    "headers": {"X-Powered-By": "PHP-FPM"}
+  },
+  "Node.js": {
+    "category": "Runtime",
+    "headers": {"X-Powered-By": "Node\\.js"}
+  },
+  "Tomcat": {
+    "category": "Web Server",
+    "headers": {"Server": "Apache-Coyote/([0-9.]+)"}
+  },
+  "Jetty": {
+    "category": "Web Server",
+    "headers": {"Server": "Jetty\\(([0-9.]+)"}
+  },
+  "Kestrel": {
+    "category": "Web Server",
+    "headers": {"Server": "Kestrel"}
+  },
+  "Squarespace": {
+    "category": "Website Builder",
+    "html": ["squarespace.com", "static1.squarespace.com"]
+  },
+  "Wix": {
+    "category": "Website Builder",
+    "html": ["wix.com", "wixstatic.com"]
+  },
+  "Webflow": {
+    "category": "Website Builder",
+    "html": ["webflow.com", "data-wf-page"]
+  },
+  "Font Awesome": {
+    "category": "Font Script",
+    "html": ["font-awesome", "fontawesome"]
+  },
+  "Lodash": {
+    "category": "JavaScript Library",
+    "script": ["lodash[.-]([0-9.]+)(?:\\.min)?\\.js"]
+  },
+  "Moment.js": {
+    "category": "JavaScript Library",
+    "script": ["moment[.-]([0-9.]+)(?:\\.min)?\\.js"]
+  },
+  "Next.js": {
+    "category": "JavaScript Framework",
+    "html": ["__NEXT_DATA__", "_next/static"]
+  },
+  "Nuxt.js": {
+    "category": "JavaScript Framework",
+    "html": ["__NUXT__", "_nuxt/"]
+  },
+  "phpMyAdmin": {
+    "category": "Database Tool",
+    "html": ["phpMyAdmin", "pma_password"]
+  },
+  "cPanel": {
+    "category": "Hosting Panel",
+    "html": ["cPanel"],
+    "headers": {"Server": "cpsrvd"}
+  },
+  "AWS CloudFront": {
+    "category": "CDN",
+    "headers": {"Via": "CloudFront", "X-Amz-Cf-Id": ".*"}
+  },
+  "Akamai": {
+    "category": "CDN",
+    "headers": {"Server": "AkamaiGHost"}
+  },
+  "HubSpot": {
+    "category": "Marketing Automation",
+    "html": ["hs-scripts.com", "hsforms.net"]
+  },
+  "Shopware": {
+    "category": "E-commerce",
+    "html": ["Shopware"],
+    "meta": {"generator": "Shopware"}
+  },
+  "Ghost": {
+    "category": "CMS",
+    "meta": {"generator": "Ghost\\s*([0-9.]+)?"},
+    "html": ["ghost.io", "/assets/built/"]
+  },
+  "TYPO3": {
+    "category": "CMS",
+    "headers": {"X-Powered-By": "TYPO3"},
+    "html": ["typo3conf", "typo3temp"]
+  }
+}

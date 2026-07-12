@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Scan Report — {{ report.domain }}</title>
+<style>
+  :root {
+    --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #16a34a; --unknown: #6b7280;
+    --bg: #0f172a; --panel: #1e293b; --text: #e2e8f0; --muted: #94a3b8; --border: #334155;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 2rem; }
+  h1 { font-size: 1.6rem; margin-bottom: 0.2rem; }
+  .subtitle { color: var(--muted); margin-bottom: 1.5rem; }
+  .summary { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.3rem; min-width: 140px; }
+  .card .num { font-size: 1.8rem; font-weight: 700; }
+  .card .label { color: var(--muted); font-size: 0.85rem; }
+  section { margin-bottom: 2.5rem; }
+  h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; font-size: 1.2rem; }
+  table { width: 100%; border-collapse: collapse; margin-top: 0.8rem; }
+  th, td { text-align: left; padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+  th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 0.75rem; }
+  .badge { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: white; }
+  .badge.CRITICAL { background: var(--critical); }
+  .badge.HIGH { background: var(--high); }
+  .badge.MEDIUM { background: var(--medium); }
+  .badge.LOW { background: var(--low); }
+  .badge.UNKNOWN { background: var(--unknown); }
+  .tech-block { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.3rem; margin-bottom: 1rem; }
+  .tech-title { font-weight: 700; font-size: 1.05rem; }
+  .tech-meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .sensitive-row { background: rgba(220, 38, 38, 0.15); }
+  .warnings { background: rgba(202, 138, 4, 0.15); border: 1px solid var(--medium); border-radius: 8px; padding: 1rem; }
+  .empty { color: var(--muted); font-style: italic; }
+  footer { color: var(--muted); font-size: 0.8rem; margin-top: 3rem; }
+</style>
+</head>
+<body>
+
+<h1>Scan Report: {{ report.domain }}</h1>
+<div class="subtitle">
+  IP: {{ report.ip or "unresolved" }} &nbsp;•&nbsp;
+  Scanned: {{ report.scan_start }} → {{ report.scan_end }}
+</div>
+
+<div class="summary">
+  <div class="card"><div class="num">{{ report.technologies|length }}</div><div class="label">Technologies Detected</div></div>
+  <div class="card"><div class="num">{{ total_cves }}</div><div class="label">Total CVEs</div></div>
+  <div class="card"><div class="num" style="color:var(--critical)">{{ severity_counts.CRITICAL }}</div><div class="label">Critical CVEs</div></div>
+  <div class="card"><div class="num" style="color:var(--high)">{{ severity_counts.HIGH }}</div><div class="label">High CVEs</div></div>
+  <div class="card"><div class="num">{{ report.ports|selectattr("state", "equalto", "open")|list|length }}</div><div class="label">Open Ports</div></div>
+  <div class="card"><div class="num" style="color:var(--critical)">{{ sensitive_findings|length }}</div><div class="label">Sensitive Findings</div></div>
+  <div class="card"><div class="num">{{ report.link_findings|length }}</div><div class="label">Passive Link Findings</div></div>
+  <div class="card"><div class="num" style="color:var(--critical)">{{ secret_findings|length }}</div><div class="label">Possible Secrets</div></div>
+</div>
+
+{% if report.warnings %}
+<div class="warnings">
+  <strong>Warnings</strong>
+  <ul>
+    {% for w in report.warnings %}<li>{{ w }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<section>
+  <h2>Technologies &amp; CVEs</h2>
+  {% if not report.technologies %}
+    <p class="empty">No technologies detected.</p>
+  {% endif %}
+  {% for item in report.technologies %}
+  <div class="tech-block">
+    <div class="tech-title">{{ item.technology.name }}{% if item.technology.version %} — v{{ item.technology.version }}{% endif %}</div>
+    <div class="tech-meta">{{ item.technology.category }} · confidence {{ item.technology.confidence }}% · {{ item.technology.evidence }}</div>
+    {% if item.cves %}
+    <table>
+      <tr><th>CVE ID</th><th>Severity</th><th>Score</th><th>Summary</th><th>Published</th></tr>
+      {% for cve in item.cves %}
+      <tr>
+        <td><a href="https://nvd.nist.gov/vuln/detail/{{ cve.cve_id }}" target="_blank" style="color:#60a5fa">{{ cve.cve_id }}</a></td>
+        <td><span class="badge {{ cve.severity }}">{{ cve.severity }}</span></td>
+        <td>{{ cve.score if cve.score is not none else "—" }}</td>
+        <td>{{ cve.summary }}</td>
+        <td>{{ cve.published_date or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">No known CVEs found{% if not item.technology.version %} (no version detected){% endif %}.</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+
+<section>
+  <h2>Open Ports</h2>
+  {% if not report.ports %}
+    <p class="empty">No open ports found.</p>
+  {% else %}
+  <table>
+    <tr><th>Port</th><th>Protocol</th><th>State</th><th>Service</th><th>Version</th><th>Notes</th></tr>
+    {% for p in report.ports %}
+    <tr>
+      <td>{{ p.port }}</td>
+      <td>{{ p.protocol }}</td>
+      <td>{{ p.state }}</td>
+      <td>{{ p.service or "—" }}</td>
+      <td>{{ p.version or "—" }}</td>
+      <td>{{ p.banner or "" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</section>
+
+<section>
+  <h2>Directory &amp; File Findings <span style="color:var(--muted); font-weight:400; font-size:0.8rem;">(active wordlist brute-force)</span></h2>
+  {% if not report.directories %}
+    <p class="empty">No directories or files found.</p>
+  {% else %}
+  <table>
+    <tr><th>Path</th><th>Status</th><th>Content-Type</th><th>Size</th><th>Note</th></tr>
+    {% for d in report.directories %}
+    <tr class="{{ 'sensitive-row' if d.is_sensitive else '' }}">
+      <td>/{{ d.path }}</td>
+      <td>{{ d.status_code }}</td>
+      <td>{{ d.content_type or "—" }}</td>
+      <td>{{ d.size if d.size is not none else "—" }}</td>
+      <td>{{ d.note or "" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</section>
+
+<section>
+  <h2>Passive Link &amp; Secret Discovery <span style="color:var(--muted); font-weight:400; font-size:0.8rem;">(FindSomething-style — extracted from HTML/JS, nothing brute-forced)</span></h2>
+  {% if not report.link_findings %}
+    <p class="empty">No links, paths, or secrets found in page source.</p>
+  {% else %}
+    {% for label, items in grouped_links.items() %}
+    <h3 style="margin-top:1.4rem; margin-bottom:0.2rem; font-size:1rem; color:var(--text);">
+      {{ label }}
+      <span style="color:var(--muted); font-weight:400; font-size:0.8rem;">({{ items|length }})</span>
+    </h3>
+    <table>
+      <tr><th>Value</th><th>Source</th></tr>
+      {% for l in items %}
+      <tr class="{{ 'sensitive-row' if label in ('Sensitive Information', 'Dynamic Code Analysis') else '' }}">
+        <td style="word-break: break-all;">{{ l.value }}</td>
+        <td style="word-break: break-all;">{{ l.source }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endfor %}
+  {% endif %}
+</section>
+
+<footer>
+  Generated by 3asfoor — educational/authorized-use tool. Do not scan targets without explicit permission.
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,21 @@
+http:
+  timeout_seconds: 10
+  max_redirects: 5
+  user_agent: "3asfoor/1.0 (+educational use)"
+
+port_scan:
+  default_ports: "top-1000"
+  timing_template: "T4"
+
+dir_scan:
+  concurrency: 20
+  rate_limit_seconds: 0.1
+  wordlist: "medium"
+
+cve:
+  cache_ttl_days: 7
+  nvd_base_url: "https://services.nvd.nist.gov/rest/json/cves/2.0"
+
+output:
+  dir: "./output"
+  format: "both"
