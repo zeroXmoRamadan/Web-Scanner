@@ -1,5 +1,7 @@
 # 3asfoor — Web Recon & Vulnerability Scanner
 
+![3asfoor Banner](./3asfoor-banner.jpg)
+
 A CLI tool that, given only a domain, scans it for:
 
 - **Technology fingerprinting** — CMS, frameworks, servers, JS libraries, and their versions
