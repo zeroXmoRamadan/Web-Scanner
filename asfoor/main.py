@@ -124,6 +124,8 @@ def scan(
     skip_api: bool = typer.Option(False, "--skip-api", help="Skip API endpoint discovery."),
     skip_links: bool = typer.Option(False, "--skip-links", help="Skip the passive FindSomething-style link/secret finder."),
     skip_cve: bool = typer.Option(False, "--skip-cve", help="Skip CVE lookups."),
+    skip_crawler: bool = typer.Option(False, "--skip-crawler", help="Skip the web crawler module."),
+    ignore_robots: bool = typer.Option(False, "--ignore-robots", help="Ignore robots.txt rules when crawling."),
     export: Optional[bool] = typer.Option(
         None, "--export/--no-export",
         help="Write JSON/HTML/findings.txt report files to --output-dir. If omitted, you'll be "
@@ -194,6 +196,7 @@ def scan(
         clean_domain, config,
         skip_ports=skip_ports, skip_dirs=skip_dirs, skip_cve=skip_cve, skip_links=skip_links,
         skip_subdomains=skip_subdomains, skip_api=skip_api,
+        skip_crawler=skip_crawler, ignore_robots=ignore_robots,
         port_override=ports, full_ports=full_ports,
         dirs_wordlist_path=dirs_wordlist_path, sensitive_wordlist_path=sensitive_wordlist_path,
         subdomains_wordlist_path=subdomains_wordlist_path, api_wordlist_path=api_wordlist_path,
@@ -229,6 +232,7 @@ def _print_report(report) -> None:
     """Render the full scan report to the console in a readable format."""
     console.print(Rule(f"[bold]Scan Report — {report.domain}[/bold]"))
     console.print(f"[bold]IP:[/bold] {report.ip or 'unresolved'}   "
+                   f"[bold]OS:[/bold] {report.os or 'Unknown'}   "
                    f"[bold]Started:[/bold] {report.scan_start}   [bold]Finished:[/bold] {report.scan_end}")
 
     _print_technologies(report)
@@ -237,6 +241,8 @@ def _print_report(report) -> None:
     _print_directories(report)
     _print_api_endpoints(report)
     _print_link_findings(report)
+    _print_crawler(report)
+    _print_findings(report)
 
     if report.warnings:
         console.print(Rule("[yellow bold]Warnings[/yellow bold]"))
@@ -406,6 +412,78 @@ def _print_link_findings(report) -> None:
             else:
                 table.add_row(f.value, f.source)
         console.print(table)
+
+
+def _print_crawler(report) -> None:
+    console.print(Rule("Web Crawler Results"))
+    if not hasattr(report, "crawled_urls") or not report.crawled_urls:
+        console.print("[dim]No crawler results found (or crawling was skipped).[/dim]")
+        return
+    
+    # Print sitemap URLs count
+    console.print(f"[bold cyan]Crawled URLs ({len(report.crawled_urls)}):[/bold cyan]")
+    for url in sorted(report.crawled_urls)[:10]:
+        console.print(f"  - {url}")
+    if len(report.crawled_urls) > 10:
+        console.print(f"  [dim]... and {len(report.crawled_urls) - 10} more URLs.[/dim]")
+        
+    # Print Forms
+    console.print()
+    if report.forms:
+        console.print(f"[bold cyan]Discovered Forms ({len(report.forms)}):[/bold cyan]")
+        form_table = _dashed_table()
+        form_table.add_column("Page URL")
+        form_table.add_column("Action")
+        form_table.add_column("Method")
+        form_table.add_column("Inputs (Name:Type:Default)")
+        for form in report.forms:
+            inputs_str = ", ".join(f"{inp['name']}:{inp['type']}:{inp['value']}" for inp in form.inputs)
+            form_table.add_row(form.url, form.action, form.method.upper(), inputs_str or "—")
+        console.print(form_table)
+    else:
+        console.print("[dim]No forms discovered.[/dim]")
+        
+    # Print External Domains
+    console.print()
+    if report.external_domains:
+        console.print(f"[bold cyan]External Domains Referenced ({len(report.external_domains)}):[/bold cyan]")
+        for dom in report.external_domains:
+            console.print(f"  - {dom}")
+    else:
+        console.print("[dim]No external domains referenced.[/dim]")
+
+
+def _print_findings(report) -> None:
+    console.print(Rule("Vulnerability & Weakness Findings"))
+    if not hasattr(report, "findings") or not report.findings:
+        console.print("[dim]No vulnerability findings detected.[/dim]")
+        return
+
+    findings_table = _dashed_table()
+    findings_table.add_column("Module")
+    findings_table.add_column("Type")
+    findings_table.add_column("Endpoint")
+    findings_table.add_column("Param")
+    findings_table.add_column("Severity")
+    findings_table.add_column("Evidence", overflow="fold")
+    
+    severity_colors = {
+        "HIGH": "bold red",
+        "MEDIUM": "yellow",
+        "LOW": "green"
+    }
+
+    for f in sorted(report.findings, key=lambda x: {"HIGH": 0, "MEDIUM": 1, "LOW": 2}.get(x.confidence, 3)):
+        color = severity_colors.get(f.confidence, "white")
+        findings_table.add_row(
+            f.module,
+            f.finding_type,
+            f.endpoint,
+            f.parameter or "—",
+            f"[{color}]{f.confidence}[/{color}]",
+            f.evidence[:150]
+        )
+    console.print(findings_table)
 
 
 # Intercept help requests to render our custom dashed-table help output.

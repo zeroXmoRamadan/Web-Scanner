@@ -15,8 +15,12 @@ from typing import Callable, Optional
 from asfoor.core.models import ScanReport, TechWithCVEs
 from asfoor.modules.api_scan import scan_api_endpoints
 from asfoor.modules.cve_lookup import lookup_cves
+from asfoor.modules.crawler import crawl_site
 from asfoor.modules.dir_scan import scan_directories
 from asfoor.modules.fingerprint import fingerprint
+from asfoor.modules.injection_detector import detect_injection_points
+from asfoor.modules.xss_detector import detect_xss
+from asfoor.modules.info_disclosure import detect_info_disclosure
 from asfoor.modules.link_finder import find_links
 from asfoor.modules.port_scan import scan_ports
 from asfoor.modules.subdomain_scan import scan_subdomains
@@ -46,6 +50,7 @@ def _noop_notify(label: str, status: str, detail: str) -> None:
 async def run_scan(domain: str, config: dict,
                     skip_ports: bool = False, skip_dirs: bool = False, skip_cve: bool = False,
                     skip_links: bool = False, skip_subdomains: bool = False, skip_api: bool = False,
+                    skip_crawler: bool = False, ignore_robots: bool = False,
                     port_override: str | None = None, full_ports: bool = False,
                     dirs_wordlist_path: Path | None = None,
                     sensitive_wordlist_path: Path | None = None,
@@ -67,6 +72,8 @@ async def run_scan(domain: str, config: dict,
     tasks = {}
     tasks["fingerprint"] = _run_phase("technology fingerprinting", fingerprint(domain, config), notify)
 
+    if not skip_crawler:
+        tasks["crawler"] = _run_phase("web crawling", crawl_site(domain, config, ignore_robots=ignore_robots), notify)
     if not skip_dirs:
         tasks["dirs"] = _run_phase("active directory & file brute-force", scan_directories(domain, config, dirs_wordlist_path=dirs_wordlist_path, sensitive_wordlist_path=sensitive_wordlist_path, wordlist_size=wordlist_size), notify)
     if not skip_subdomains:
@@ -106,12 +113,52 @@ async def run_scan(domain: str, config: dict,
         else:
             subdomains = named_results["subdomains"]
 
+    crawled_urls = []
+    forms = []
+    crawler_apis = []
+    external_domains = []
+    crawl_responses = []
+    if "crawler" in named_results:
+        if isinstance(named_results["crawler"], Exception):
+            warnings.append(f"Web crawling failed: {named_results['crawler']}")
+        else:
+            crawled_urls, forms, crawler_apis, external_domains, crawl_responses = named_results["crawler"]
+
+    findings = []
+
+    # Run passive Injection, XSS & Info Disclosure Detectors
+    if crawl_responses:
+        try:
+            injection_findings = await detect_injection_points(crawl_responses, forms)
+            findings.extend(injection_findings)
+        except Exception as e:
+            warnings.append(f"Passive injection detection failed: {e}")
+
+        try:
+            xss_findings = await detect_xss(crawl_responses, forms)
+            findings.extend(xss_findings)
+        except Exception as e:
+            warnings.append(f"Passive XSS detection failed: {e}")
+
+        try:
+            disclosure_findings = await detect_info_disclosure(crawl_responses)
+            findings.extend(disclosure_findings)
+        except Exception as e:
+            warnings.append(f"Passive info disclosure detection failed: {e}")
+
     api_endpoints = []
     if "api" in named_results:
         if isinstance(named_results["api"], Exception):
             warnings.append(f"API endpoint scan failed: {named_results['api']}")
         else:
             api_endpoints = named_results["api"]
+
+    # Merge and deduplicate api_endpoints from active scanner and web crawler
+    api_map = {ep.path: ep for ep in api_endpoints}
+    for ep in crawler_apis:
+        if ep.path not in api_map:
+            api_map[ep.path] = ep
+    api_endpoints = sorted(api_map.values(), key=lambda ep: ep.path)
 
     link_findings = []
     if "links" in named_results:
@@ -141,6 +188,14 @@ async def run_scan(domain: str, config: dict,
 
     scan_end = ScanReport.now_iso()
 
+    inferred_os = None
+    cleaned_warnings = []
+    for w in warnings:
+        if w.startswith("OS Fingerprint: "):
+            inferred_os = w.split("OS Fingerprint: ")[1]
+        else:
+            cleaned_warnings.append(w)
+
     return ScanReport(
         domain=domain,
         ip=ip,
@@ -152,5 +207,11 @@ async def run_scan(domain: str, config: dict,
         subdomains=subdomains,
         api_endpoints=api_endpoints,
         link_findings=link_findings,
-        warnings=warnings,
+        warnings=cleaned_warnings,
+        os=inferred_os,
+        crawled_urls=crawled_urls,
+        forms=forms,
+        external_domains=external_domains,
+        findings=findings,
+        crawl_responses=crawl_responses,
     )

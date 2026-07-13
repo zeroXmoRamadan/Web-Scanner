@@ -43,6 +43,7 @@ class PortResult:
     service: Optional[str] = None
     version: Optional[str] = None
     banner: Optional[str] = None
+    confidence: Optional[int] = None  # version detection confidence percentage (0-100) or None if untested
 
 
 @dataclass
@@ -95,6 +96,36 @@ class LinkFinding:
 
 
 @dataclass
+class FormDetails:
+    url: str
+    action: str
+    method: str
+    inputs: list[dict[str, str]]  # list of {name: ..., type: ..., value: ...}
+
+
+@dataclass
+class CrawlResponse:
+    url: str
+    method: str
+    status_code: int
+    response_time: float  # in seconds
+    body: str
+    headers: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class VulnerabilityFinding:
+    module: str             # "injection", "xss", "info_disclosure", etc.
+    endpoint: str           # Target URL or path
+    parameter: Optional[str]
+    method: str
+    finding_type: str       # e.g. "SQL Injection (Error-based)"
+    confidence: str         # "LOW" / "MEDIUM" / "HIGH"
+    evidence: str           # Reflected payload or error trace match
+    description: str
+
+
+@dataclass
 class ScanReport:
     domain: str
     ip: Optional[str]
@@ -107,6 +138,12 @@ class ScanReport:
     api_endpoints: list[ApiEndpointResult] = field(default_factory=list)
     link_findings: list[LinkFinding] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    os: Optional[str] = None
+    crawled_urls: list[str] = field(default_factory=list)
+    forms: list[FormDetails] = field(default_factory=list)
+    external_domains: list[str] = field(default_factory=list)
+    findings: list[VulnerabilityFinding] = field(default_factory=list)
+    crawl_responses: list[CrawlResponse] = field(default_factory=list)
 
     @staticmethod
     def now_iso() -> str:
