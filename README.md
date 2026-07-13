@@ -1,7 +1,5 @@
 # 3asfoor — Web Recon & Vulnerability Scanner
 
-![3asfoor Banner](./3asfoor-banner.jpg)
-
 A CLI tool that, given only a domain, scans it for:
 
 - **Technology fingerprinting** — CMS, frameworks, servers, JS libraries, and their versions
@@ -89,36 +87,40 @@ Below is the complete list of CLI arguments, options, and flags available when r
 
 ### Target Argument
 
-* **`DOMAIN`** (Required)  
+- **`DOMAIN`** (Required)  
   The target domain to scan (e.g., `example.com`).
 
 ### Authorizations & Safety
 
-* **`--i-have-permission`** (Flag)  
+- **`--i-have-permission`** (Flag)  
   Confirm authorization to scan the target. If omitted in non-interactive environments, the tool will abort. In interactive terminals, you will be prompted for confirmation.
 
 ### Scope & Target Ports
+
 * **`--full-ports`** (Flag)  
   Scans all 65535 TCP ports instead of the default top 1000 ports.
-* **`--ports <spec>`** (Option)  
+- **`--ports <spec>`** (Option)  
   Specifies custom TCP port ranges/specifications to scan (e.g., `--ports "80,443,8080-8090"`).
 
 ### Custom Wordlists
+
 * **`--wordlist <path>`** (Option)  
   Path to a custom wordlist file for active directory brute-forcing (one path per line). If not provided, the bundled `data/wordlists/common_dirs.txt` is used.
-* **`--sensitive-wordlist <path>`** (Option)  
+- **`--sensitive-wordlist <path>`** (Option)  
   Path to a custom wordlist file for sensitive file discovery (one path per line). If not provided, the bundled `data/wordlists/sensitive_files.txt` is used.
 
 ### Performance Tuning
+
 * **`--concurrency <num>`** (Option)  
   Max number of parallel HTTP requests during active directory brute-forcing (default: `20`). Higher values scan faster but put more load on the target.
-* **`--rate-limit <seconds>`** (Option)  
+- **`--rate-limit <seconds>`** (Option)  
   Minimum delay in seconds between individual directory-scan HTTP requests (supports decimals, e.g., `0.5`). Useful to avoid overwhelming the target server.
 
 ### Module Exclusion Flags
 
-* **`--skip-ports`** (Flag)  
+- **`--skip-ports`** (Flag)  
   Skips port scanning and service detection completely.
+
 - **`--skip-dirs`** (Flag)  
   Skips active wordlist directory and sensitive file brute-forcing.
 - **`--skip-links`** (Flag)  
@@ -128,8 +130,9 @@ Below is the complete list of CLI arguments, options, and flags available when r
 
 ### Reports & Export Controls
 
-* **`--export / --no-export`** (Option)  
+- **`--export / --no-export`** (Option)  
   Explicitly force or prevent saving report outputs (`.json`, `.html`, `_findings.txt`) to disk. If left unspecified, you will be asked interactively after a successful scan.
+
 - **`--format <fmt>`** (Option)  
   Report output format selection: `json | html | both` (default: `both`).
 - **`--output-dir <dir>`** (Option)  
@@ -137,8 +140,9 @@ Below is the complete list of CLI arguments, options, and flags available when r
 
 ### Debugging & Output Modes
 
-* **`--verbose`** (Flag)  
+- **`--verbose`** (Flag)  
   Enables verbose logging to standard output/logs.
+
 - **`--quiet`** (Flag)  
   Enables silent execution mode. Suppresses startup ASCII banners, loading indicators, and interactive prompts (forces `--no-export` unless `--export` is explicitly passed).
 
