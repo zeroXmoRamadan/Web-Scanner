@@ -55,6 +55,7 @@ CPE_MAP: dict[str, tuple[str, str]] = {
     "phpMyAdmin": ("phpmyadmin", "phpmyadmin"),
     "Lodash": ("lodash", "lodash"),
     "Moment.js": ("momentjs", "moment"),
+    "Oracle WebLogic Server": ("oracle", "weblogic_server"),
 }
 
 

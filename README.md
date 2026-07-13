@@ -2,12 +2,14 @@
 
 ![3asfoor Banner](./3asfoor-banner.jpg)
 
-A CLI tool that, given only a domain, scans it for:
+A CLI tool that, given only a domain, performs comprehensive web reconnaissance:
 
-- **Technology fingerprinting** — CMS, frameworks, servers, JS libraries, and their versions
-- **Known CVEs** for the detected technologies (via the NVD API)
+- **Technology fingerprinting** — powered by [Wappalyzer](https://github.com/chorsley/python-Wappalyzer) (1270+ technology signatures): CMS, frameworks, servers, JS libraries, and their versions
+- **Known CVEs** for detected technologies (via the NVD API, with SQLite caching)
 - **Open ports & services** (via nmap, with a fallback TCP connect scan)
-- **Directories & sensitive files** — active wordlist brute-force (config backups, `.env`, `.git`, exposed keys, etc.)
+- **Directory & sensitive file discovery** — active wordlist brute-force with soft-404 detection (config backups, `.env`, `.git`, exposed keys, etc.)
+- **Subdomain enumeration** — DNS resolution + HTTP probing
+- **API endpoint & route discovery** — brute-force with soft-404 detection
 - **Passive link, path & secret discovery** — a **FindSomething-style** pass over the homepage
   HTML and linked JS/CSS/JSON that classifies everything it finds into the same category
   buckets that tool reports. See [Passive Link & Secret Discovery](#passive-link-path--secret-discovery-link_finderpy)
@@ -21,10 +23,13 @@ See [`LEGAL.md`](./LEGAL.md) before using this against any target.
 git clone https://github.com/zeroXmoRamadan/Web-Scanner.git
 cd Web-Scanner
 python3 -m venv venv
-source venv/bin/activate
+source venv/bin/activate        # Linux/macOS
+# venv\Scripts\activate          # Windows PowerShell
 pip install -r requirements.txt
 pip install -e .
 ```
+
+**Requirements:** Python 3.11+ (tested on 3.13 and 3.14).
 
 **nmap** is required for full port-scan results (service/version detection). Without it, the tool
 falls back to a basic open/closed TCP connect scan.
@@ -62,9 +67,8 @@ will not run active scans (ports/directories) without explicit authorization.
 On start, the tool prints an ASCII-art banner, then live phase progress as it works
 (e.g. `* Running port scanning...`, `* port scanning complete`). Once the scan finishes,
 the **full report is always printed to the console** — technologies with their CVEs, open
-ports, discovered directories/files, and every passive link/path/secret finding grouped
-into its category (Domain, PATH, Incomplete Path, URL, Static Path, IP Address, Email
-Address, Sensitive Information, Dynamic Code Analysis) — as readable, color-coded tables.
+ports, discovered subdomains, directories/files, API endpoints, and every passive
+link/path/secret finding grouped into its category — as readable, color-coded tables.
 No report file is written unless you ask for one.
 
 ### Exporting report files
@@ -104,31 +108,35 @@ Below is the complete list of CLI arguments, options, and flags available when r
 - **`--ports <spec>`** (Option)  
   Specifies custom TCP port ranges/specifications to scan (e.g., `--ports "80,443,8080-8090"`).
 
-### Custom Wordlists
+### Wordlists
 
-* **`--wordlist <path>`** (Option)  
-  Path to a custom wordlist file for active directory brute-forcing (one path per line). If not provided, the bundled `data/wordlists/common_dirs.txt` is used.
-- **`--sensitive-wordlist <path>`** (Option)  
-  Path to a custom wordlist file for sensitive file discovery (one path per line). If not provided, the bundled `data/wordlists/sensitive_files.txt` is used.
+* **`--wordlist-size <size>`** (Option)  
+  Select which bundled SecLists wordlist to use for all modules (directories, sensitive files, subdomains, and API endpoints): `small` (default), `medium`, or `large`. The tool ships with curated wordlists organized by size under the `seclists/` directory. **Concurrency is auto-scaled** based on this setting (1× for small, 2× for medium, 4× for large).
+
+* **`--wordlist <path>`** or **`--dir-wordlist <path>`** (Option)  
+  Path to a custom wordlist file for active directory brute-forcing (one path per line). Overrides the bundled SecLists.
+* **`--sensitive-wordlist <path>`** (Option)  
+  Path to a custom wordlist file for sensitive file discovery (one path per line). Overrides the bundled SecLists.
+* **`--subdomain-wordlist <path>`** (Option)  
+  Path to a custom wordlist file for subdomain discovery (one path per line). Overrides the bundled SecLists.
+* **`--api-wordlist <path>`** (Option)  
+  Path to a custom wordlist file for API endpoint discovery (one path per line). Overrides the bundled SecLists.
 
 ### Performance Tuning
 
 * **`--concurrency <num>`** (Option)  
-  Max number of parallel HTTP requests during active directory brute-forcing (default: `20`). Higher values scan faster but put more load on the target.
+  Override the auto-scaled concurrency for HTTP requests during active brute-forcing. By default, concurrency scales automatically with `--wordlist-size` (20 for small, 40 for medium, 80 for large).
 - **`--rate-limit <seconds>`** (Option)  
   Minimum delay in seconds between individual directory-scan HTTP requests (supports decimals, e.g., `0.5`). Useful to avoid overwhelming the target server.
 
 ### Module Exclusion Flags
 
-- **`--skip-ports`** (Flag)  
-  Skips port scanning and service detection completely.
-
-- **`--skip-dirs`** (Flag)  
-  Skips active wordlist directory and sensitive file brute-forcing.
-- **`--skip-links`** (Flag)  
-  Skips passive FindSomething-style link, path, and secret extraction.
-- **`--skip-cve`** (Flag)  
-  Skips checking technology versions against NVD CVE database.
+- **`--skip-ports`** — Skip port scanning and service detection.
+- **`--skip-dirs`** — Skip active wordlist directory and sensitive file brute-forcing.
+- **`--skip-subdomains`** — Skip subdomain enumeration.
+- **`--skip-api`** — Skip API endpoint discovery.
+- **`--skip-links`** — Skip passive FindSomething-style link, path, and secret extraction.
+- **`--skip-cve`** — Skip checking technology versions against NVD CVE database.
 
 ### Reports & Export Controls
 
@@ -153,9 +161,9 @@ Below is the complete list of CLI arguments, options, and flags available when r
 ## Output
 
 The console report (always shown) covers, in order: technologies + CVE detail, open ports,
-directories/files found, and passive link/path/secret findings grouped by category — with
-sensitive-information and dynamic-code-analysis hits highlighted, and a warnings section at
-the end if anything went wrong mid-scan.
+subdomains, directories/files found, API endpoints, and passive link/path/secret findings
+grouped by category — with sensitive-information and dynamic-code-analysis hits highlighted,
+and a warnings section at the end if anything went wrong mid-scan.
 
 If you choose to export (`--export`, or answering "yes" to the prompt), the tool additionally
 writes to `./output/` by default:
@@ -166,7 +174,42 @@ writes to `./output/` by default:
   as a grouped plain-text export (only written when at least one finding exists) — see below
 - `scan.log` — run log (always written, independent of `--export`)
 
-## Passive Link, Path & Secret Discovery (`link_finder.py`)
+## Scan Modules
+
+### Technology Fingerprinting (`fingerprint.py`)
+
+Powered by [python-Wappalyzer](https://github.com/chorsley/python-Wappalyzer) — a community-maintained
+signature database with **1270+ technology definitions**. Detects CMS platforms, web frameworks,
+JavaScript libraries, analytics tools, CDNs, web servers, and more from HTTP headers, cookies,
+meta tags, script references, and HTML patterns.
+
+The module constructs a Wappalyzer `WebPage` from the already-fetched httpx response (no duplicate
+HTTP request) and returns technology names, versions, categories, and confidence scores.
+
+> **Python 3.12–3.14+ Compatibility:** The tool includes a built-in compatibility shim
+> (`asfoor/utils/wappalyzer_compat.py`) that transparently handles the `pkg_resources` removal
+> in modern Python/setuptools. No manual patching of any installed packages is required.
+
+### Subdomain Enumeration (`subdomain_scan.py`)
+
+DNS-resolves candidate subdomains from the bundled SecLists wordlists, then HTTP-probes each
+resolved host to capture status codes and page titles. Results include the subdomain, resolved IP,
+HTTP status, and `<title>` tag. Concurrency auto-scales with `--wordlist-size`.
+
+### API Endpoint Discovery (`api_scan.py`)
+
+Brute-forces common API paths (`/api/v1/users`, `/graphql`, `/health`, etc.) from the bundled
+SecLists, with built-in soft-404 detection to filter false positives. Reports status code,
+content type, response size, and a human-readable note. Concurrency auto-scales with `--wordlist-size`.
+
+### Directory & Sensitive File Discovery (`dir_scan.py`)
+
+Active wordlist brute-force against the target, scanning for both common directories and
+sensitive files (`.env`, `.git/config`, `backup.zip`, exposed keys, etc.). Uses soft-404
+detection to filter false positives. Sensitive findings are highlighted in the report.
+Concurrency auto-scales with `--wordlist-size`.
+
+### Passive Link, Path & Secret Discovery (`link_finder.py`)
 
 This module is modeled on the **FindSomething** browser extension: rather than guessing
 paths by brute-forcing a wordlist against the server (that's what `dir_scan.py` does), it
@@ -176,7 +219,7 @@ regex-classifies everything it finds into the same buckets that tool reports. No
 is requested that a normal browser wouldn't already fetch when loading the page; it is
 **100% passive**.
 
-### Categories
+#### Categories
 
 | Section (report label)   | What it catches | Example |
 |---|---|---|
@@ -194,7 +237,7 @@ A single literal can legitimately appear in more than one section — e.g. a roo
 `https://www.hcaptcha.com/` is both a valid **Domain** and a valid **URL** — this mirrors
 how the original extension behaves and is expected, not a bug.
 
-### Example output
+#### Example output
 
 Running the module against a page produces a grouped, deduplicated report like this
 (this is the exact `_findings.txt` export format):
@@ -251,7 +294,7 @@ sorted alphabetically. This same grouping is what the HTML report renders (one t
 section) and what `ScanReport.link_findings` holds in the JSON report (as flat
 `{category, value, source}` records — see below).
 
-### Data model
+#### Data model
 
 Every finding is a `LinkFinding(category, value, source)`:
 
@@ -265,7 +308,7 @@ Every finding is a `LinkFinding(category, value, source)`:
 - **`value`** — the extracted string itself.
 - **`source`** — `"homepage"`, or the absolute URL of the JS/CSS/JSON asset it was found in.
 
-### Programmatic use
+#### Programmatic use
 
 ```python
 from asfoor.modules.link_finder import find_links, format_findings_report
@@ -277,40 +320,74 @@ print(format_findings_report(findings))               # grouped plain-text expor
 `format_findings_report()` is what powers the `_findings.txt` report file and can be called
 directly on any list of `LinkFinding` objects (e.g. in a notebook, a custom script, or a test).
 
-## Project layout
+## Wordlists
+
+The tool uses curated wordlists from the bundled `seclists/` directory, organized by scan type and size:
+
+```
+seclists/
+├── directory_discovery/       # paths for active dir brute-force
+│   ├── small.txt
+│   ├── medium.txt
+│   └── large.txt
+├── subdomain_discovery/       # candidate subdomains
+│   ├── small.txt
+│   ├── medium.txt
+│   └── large.txt
+├── api_endpoints_discovery/   # common API routes
+│   └── small.txt
+└── sensitive_files_discovery/ # .env, .git, backups, etc.
+    ├── small.txt
+    ├── medium.txt
+    └── large.txt
+```
+
+**Default is `small`** for all modules — use `--wordlist-size medium` or `--wordlist-size large` for broader coverage. Concurrency automatically scales with `--wordlist-size` based on a base of 100:
+
+| Size | Concurrency Multiplier | Example (base 100) |
+|---|---|---|
+| `small` | 1× | 100 threads |
+| `medium` | 2× | 200 threads |
+| `large` | 4× | 400 threads |
+
+You can override any wordlist with `--wordlist <path>` (or `--dir-wordlist <path>`), `--sensitive-wordlist <path>`, `--subdomain-wordlist <path>`, and `--api-wordlist <path>` for custom path files.
+
+## Project Layout
 
 ```
 3asfoor/
 ├── asfoor/
-│   ├── main.py              # CLI (Typer)
-│   ├── core/                # models, orchestrator, config loader
-│   ├── modules/              # fingerprint, cve_lookup, port_scan, dir_scan, link_finder, report
-│   ├── utils/                # http client, rate limiter, logger, banner, validators
-│   └── templates/            # HTML report template
-├── data/
-│   ├── signatures/           # technology fingerprint rules
-│   └── wordlists/            # directory + sensitive-file wordlists (active brute-force)
-└── tests/                    # pytest unit tests (mocked HTTP/nmap, no live network)
+│   ├── main.py               # CLI (Typer)
+│   ├── core/                  # models, orchestrator, config loader
+│   ├── modules/               # fingerprint, cve_lookup, port_scan, dir_scan,
+│   │                          #   subdomain_scan, api_scan, link_finder, report
+│   ├── utils/                 # http client, rate limiter, logger, banner,
+│   │                          #   validators, wordlist utils, wappalyzer compat
+│   └── templates/             # HTML report template
+├── config/                    # YAML config (defaults.yaml)
+├── data/                      # runtime cache (cve_cache.sqlite3)
+├── seclists/                  # bundled wordlists (dirs, subdomains, API, sensitive files)
+└── output/                    # scan reports (JSON, HTML, findings.txt, scan.log)
 ```
 
-## Running tests
+## Dependencies
 
-```bash
-pytest
-```
+| Package | Purpose |
+|---|---|
+| `httpx` | Async HTTP client |
+| `typer` + `rich` | CLI framework + colored tables |
+| `python-Wappalyzer` | Technology fingerprinting engine (1270+ signatures) |
+| `setuptools` | Provides `pkg_resources` for Wappalyzer compatibility |
+| `pyyaml` | Config file parsing |
+| `jinja2` | HTML report templating |
+| `python-nmap` | nmap integration for port scanning |
 
-Tests are fully mocked — no live network calls or actual scans are performed during testing.
-`tests/test_link_finder.py` covers every category the passive link finder reports (domain,
-path, incomplete path, url, static path, ip, email, sensitive information, dynamic code
-analysis), the domain/URL dual-classification behavior, `group_key()`, and the grouped
-plain-text export.
+## Notes / Limitations
 
-## Notes / limitations
-
-- Technology signature database is a curated set of ~50 common technologies, not an
-  exhaustive list — extend `data/signatures/technologies.json` to add more.
+- Technology detection is powered by Wappalyzer's 1270+ signature database — no manual
+  signature maintenance needed.
 - CVE matching relies on a hand-maintained CPE vendor/product map (`cve_lookup.py`); add
-  entries there for any new technology you add to the signature database.
+  entries there for any new technology not covered.
 - Passive link/secret discovery only parses content the target already serves (homepage
   HTML + linked JS/CSS/JSON) — it does not guess or request paths that weren't referenced.
 - The "Sensitive Information" and "Dynamic Code Analysis" categories are pattern-based and

@@ -15,6 +15,8 @@ class RateLimiter:
         self._last_call = 0.0
 
     async def wait(self) -> None:
+        if self.delay_seconds <= 0:
+            return
         async with self._lock:
             loop = asyncio.get_event_loop()
             now = loop.time()

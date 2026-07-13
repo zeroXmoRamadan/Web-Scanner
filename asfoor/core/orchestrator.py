@@ -13,11 +13,13 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from asfoor.core.models import ScanReport, TechWithCVEs
+from asfoor.modules.api_scan import scan_api_endpoints
 from asfoor.modules.cve_lookup import lookup_cves
 from asfoor.modules.dir_scan import scan_directories
 from asfoor.modules.fingerprint import fingerprint
 from asfoor.modules.link_finder import find_links
 from asfoor.modules.port_scan import scan_ports
+from asfoor.modules.subdomain_scan import scan_subdomains
 from asfoor.utils.validators import resolve_ip
 
 logger = logging.getLogger("asfoor.orchestrator")
@@ -43,10 +45,13 @@ def _noop_notify(label: str, status: str, detail: str) -> None:
 
 async def run_scan(domain: str, config: dict,
                     skip_ports: bool = False, skip_dirs: bool = False, skip_cve: bool = False,
-                    skip_links: bool = False,
+                    skip_links: bool = False, skip_subdomains: bool = False, skip_api: bool = False,
                     port_override: str | None = None, full_ports: bool = False,
                     dirs_wordlist_path: Path | None = None,
                     sensitive_wordlist_path: Path | None = None,
+                    subdomains_wordlist_path: Path | None = None,
+                    api_wordlist_path: Path | None = None,
+                    wordlist_size: str = "small",
                     on_phase: Optional[PhaseCallback] = None) -> ScanReport:
     notify = on_phase or _noop_notify
 
@@ -63,7 +68,11 @@ async def run_scan(domain: str, config: dict,
     tasks["fingerprint"] = _run_phase("technology fingerprinting", fingerprint(domain, config), notify)
 
     if not skip_dirs:
-        tasks["dirs"] = _run_phase("active directory & file brute-force", scan_directories(domain, config, dirs_wordlist_path=dirs_wordlist_path, sensitive_wordlist_path=sensitive_wordlist_path), notify)
+        tasks["dirs"] = _run_phase("active directory & file brute-force", scan_directories(domain, config, dirs_wordlist_path=dirs_wordlist_path, sensitive_wordlist_path=sensitive_wordlist_path, wordlist_size=wordlist_size), notify)
+    if not skip_subdomains:
+        tasks["subdomains"] = _run_phase("subdomain enumeration", scan_subdomains(domain, config, wordlist_size=wordlist_size, wordlist_path=subdomains_wordlist_path), notify)
+    if not skip_api:
+        tasks["api"] = _run_phase("API endpoint discovery", scan_api_endpoints(domain, config, wordlist_size=wordlist_size, wordlist_path=api_wordlist_path), notify)
     if not skip_links:
         tasks["links"] = _run_phase("passive link & secret discovery", find_links(domain, config), notify)
     if not skip_ports:
@@ -89,6 +98,20 @@ async def run_scan(domain: str, config: dict,
             warnings.append(f"Directory scan failed: {named_results['dirs']}")
         else:
             directories = named_results["dirs"]
+
+    subdomains = []
+    if "subdomains" in named_results:
+        if isinstance(named_results["subdomains"], Exception):
+            warnings.append(f"Subdomain scan failed: {named_results['subdomains']}")
+        else:
+            subdomains = named_results["subdomains"]
+
+    api_endpoints = []
+    if "api" in named_results:
+        if isinstance(named_results["api"], Exception):
+            warnings.append(f"API endpoint scan failed: {named_results['api']}")
+        else:
+            api_endpoints = named_results["api"]
 
     link_findings = []
     if "links" in named_results:
@@ -126,6 +149,8 @@ async def run_scan(domain: str, config: dict,
         technologies=tech_with_cves,
         ports=ports,
         directories=directories,
+        subdomains=subdomains,
+        api_endpoints=api_endpoints,
         link_findings=link_findings,
         warnings=warnings,
     )

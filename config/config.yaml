@@ -8,9 +8,17 @@ port_scan:
   timing_template: "T4"
 
 dir_scan:
-  concurrency: 20
-  rate_limit_seconds: 0.1
-  wordlist: "medium"
+  concurrency: 100
+  rate_limit_seconds: 0.01
+  wordlist_size: "small"   # small | medium | large — picks from bundled seclists
+
+subdomain_scan:
+  concurrency: 100         # auto-scaled by wordlist size
+  timeout_seconds: 3
+
+api_scan:
+  concurrency: 100         # auto-scaled by wordlist size
+  rate_limit_seconds: 0.01
 
 cve:
   cache_ttl_days: 7

@@ -28,7 +28,7 @@ from asfoor.utils.validators import (
     validate_domain,
 )
 
-app = typer.Typer(help="3asfoor — web recon & vulnerability scanner: tech fingerprinting, CVEs, ports, directories.")
+app = typer.Typer(help="3asfoor — web recon & vulnerability scanner: tech fingerprinting, CVEs, ports, directories, subdomains, API endpoints.")
 console = Console()
 
 SEVERITY_COLOR = {"CRITICAL": "red", "HIGH": "orange3", "MEDIUM": "yellow", "LOW": "green", "UNKNOWN": "grey58"}
@@ -38,6 +38,58 @@ def _dashed_table(**kwargs) -> Table:
     """Build a Table with a dashed "-"/"+" border, and a dashed separator
     line between every row so cells read as clearly delimited on the CLI."""
     return Table(box=box.ASCII, show_lines=True, **kwargs)
+
+
+def _print_custom_help() -> None:
+    """Print a highly readable custom help menu with dashed table lines."""
+    # Print the ASCII banner
+    print_banner(console)
+
+    console.print("[bold cyan]Usage:[/bold cyan] 3asfoor scan [OPTIONS] DOMAIN\n")
+    console.print("Run a full scan against DOMAIN: tech fingerprinting, CVE lookup, port scan,\n"
+                  "active directory brute-force, subdomain enumeration, API endpoint discovery,\n"
+                  "and passive (FindSomething-style) link/secret discovery.\n")
+
+    # Arguments table
+    args_table = _dashed_table()
+    args_table.add_column("Argument", style="bold green")
+    args_table.add_column("Type", style="cyan")
+    args_table.add_column("Description", style="white")
+    args_table.add_row("DOMAIN", "TEXT", "Target domain to scan (e.g. example.com). [required]")
+    console.print("[bold]Arguments:[/bold]")
+    console.print(args_table)
+    console.print()
+
+    # Options table
+    opts_table = _dashed_table()
+    opts_table.add_column("Option", style="bold green")
+    opts_table.add_column("Type", style="cyan")
+    opts_table.add_column("Description", style="white")
+
+    opts_table.add_row("--i-have-permission", "FLAG", "Confirm authorization to scan target (required for non-interactive).")
+    opts_table.add_row("--full-ports", "FLAG", "Scan all 65535 TCP ports instead of the default top 1000.")
+    opts_table.add_row("--ports", "TEXT", "Specifies custom TCP port specs (e.g. '80,443,8080-8090').")
+    opts_table.add_row("--wordlist / --dir-wordlist", "TEXT", "Path to a custom wordlist file for directory brute-forcing. Overrides SecLists.")
+    opts_table.add_row("--sensitive-wordlist", "TEXT", "Path to a custom wordlist file for sensitive file discovery. Overrides SecLists.")
+    opts_table.add_row("--subdomain-wordlist", "TEXT", "Path to a custom wordlist file for subdomain discovery. Overrides SecLists.")
+    opts_table.add_row("--api-wordlist", "TEXT", "Path to a custom wordlist file for API endpoint discovery. Overrides SecLists.")
+    opts_table.add_row("--wordlist-size", "TEXT", "Wordlist size for all modules: 'small' (default), 'medium', or 'large'.")
+    opts_table.add_row("--concurrency", "INTEGER", "Max concurrent requests during brute-forcing (default: auto-scaled by size).")
+    opts_table.add_row("--rate-limit", "FLOAT", "Seconds delay between directory-scan requests (default: 0.01).")
+    opts_table.add_row("--skip-ports", "FLAG", "Skip port scanning and service detection.")
+    opts_table.add_row("--skip-dirs", "FLAG", "Skip active directory and sensitive file brute-forcing.")
+    opts_table.add_row("--skip-subdomains", "FLAG", "Skip subdomain enumeration.")
+    opts_table.add_row("--skip-api", "FLAG", "Skip API endpoint discovery.")
+    opts_table.add_row("--skip-links", "FLAG", "Skip passive FindSomething-style link/secret finder.")
+    opts_table.add_row("--skip-cve", "FLAG", "Skip CVE lookups.")
+    opts_table.add_row("--export / --no-export", "FLAG/OPT", "Write report files (.json, .html, findings.txt) to output directory.")
+    opts_table.add_row("--format", "TEXT", "Report output format: 'json', 'html', or 'both' (default: both).")
+    opts_table.add_row("--output-dir", "TEXT", "Specify custom output directory where reports are saved (default: ./output).")
+    opts_table.add_row("--verbose", "FLAG", "Enables verbose logging to standard output/logs.")
+    opts_table.add_row("--quiet", "FLAG", "Enables silent execution mode.")
+
+    console.print("[bold]Options:[/bold]")
+    console.print(opts_table)
 
 
 @app.callback()
@@ -58,13 +110,18 @@ def scan(
     ),
     full_ports: bool = typer.Option(False, "--full-ports", help="Scan all 65535 ports instead of top 1000."),
     ports: Optional[str] = typer.Option(None, "--ports", help='Custom port spec, e.g. "80,443,8080-8090".'),
-    wordlist: Optional[str] = typer.Option(None, "--wordlist", help="Path to a custom wordlist file for directory brute-forcing (one path per line)."),
+    wordlist: Optional[str] = typer.Option(None, "--wordlist", "--dir-wordlist", help="Path to a custom wordlist file for directory brute-forcing (one path per line)."),
     sensitive_wordlist: Optional[str] = typer.Option(None, "--sensitive-wordlist", help="Path to a custom wordlist file for sensitive file discovery (one path per line)."),
+    subdomain_wordlist: Optional[str] = typer.Option(None, "--subdomain-wordlist", help="Path to a custom wordlist file for subdomain discovery (one path per line)."),
+    api_wordlist: Optional[str] = typer.Option(None, "--api-wordlist", help="Path to a custom wordlist file for API endpoint discovery (one path per line)."),
+    wordlist_size: str = typer.Option("small", "--wordlist-size", help='Wordlist size to use from the bundled seclists for all modules (directories, sensitive files, subdomains, API endpoints): "small" (default), "medium", or "large". Ignored when custom --wordlist or --sensitive-wordlist is given.'),
     output_dir: str = typer.Option("./output", "--output-dir", help="Directory reports are written to, if exporting."),
-    concurrency: Optional[int] = typer.Option(None, "--concurrency", help="Max number of parallel requests during directory brute-forcing (default: 20)."),
+    concurrency: Optional[int] = typer.Option(None, "--concurrency", help="Max number of parallel requests during directory brute-forcing (default: auto-scaled by --wordlist-size)."),
     rate_limit: Optional[float] = typer.Option(None, "--rate-limit", help="Seconds delay between directory-scan requests."),
     skip_ports: bool = typer.Option(False, "--skip-ports", help="Skip the port scan module."),
     skip_dirs: bool = typer.Option(False, "--skip-dirs", help="Skip the active (wordlist brute-force) directory scan module."),
+    skip_subdomains: bool = typer.Option(False, "--skip-subdomains", help="Skip subdomain enumeration."),
+    skip_api: bool = typer.Option(False, "--skip-api", help="Skip API endpoint discovery."),
     skip_links: bool = typer.Option(False, "--skip-links", help="Skip the passive FindSomething-style link/secret finder."),
     skip_cve: bool = typer.Option(False, "--skip-cve", help="Skip CVE lookups."),
     export: Optional[bool] = typer.Option(
@@ -77,7 +134,8 @@ def scan(
     quiet: bool = typer.Option(False, "--quiet"),
 ):
     """Run a full scan against DOMAIN: tech fingerprinting, CVE lookup, port scan,
-    active directory brute-force, and passive (FindSomething-style) link/secret discovery.
+    active directory brute-force, subdomain enumeration, API endpoint discovery,
+    and passive (FindSomething-style) link/secret discovery.
 
     The full report is always printed to the console when the scan finishes. Writing it to
     files (JSON/HTML/findings.txt) is optional — pass --export to always write them, --no-export
@@ -123,12 +181,23 @@ def scan(
 
     dirs_wordlist_path = Path(wordlist) if wordlist else None
     sensitive_wordlist_path = Path(sensitive_wordlist) if sensitive_wordlist else None
+    subdomains_wordlist_path = Path(subdomain_wordlist) if subdomain_wordlist else None
+    api_wordlist_path = Path(api_wordlist) if api_wordlist else None
+
+    # Validate wordlist_size
+    wordlist_size = wordlist_size.lower()
+    if wordlist_size not in ("small", "medium", "large"):
+        console.print(f"[red]Error:[/red] --wordlist-size must be 'small', 'medium', or 'large', got '{wordlist_size}'")
+        raise typer.Exit(code=1)
 
     report = asyncio.run(run_scan(
         clean_domain, config,
         skip_ports=skip_ports, skip_dirs=skip_dirs, skip_cve=skip_cve, skip_links=skip_links,
+        skip_subdomains=skip_subdomains, skip_api=skip_api,
         port_override=ports, full_ports=full_ports,
         dirs_wordlist_path=dirs_wordlist_path, sensitive_wordlist_path=sensitive_wordlist_path,
+        subdomains_wordlist_path=subdomains_wordlist_path, api_wordlist_path=api_wordlist_path,
+        wordlist_size=wordlist_size,
         on_phase=on_phase,
     ))
 
@@ -164,7 +233,9 @@ def _print_report(report) -> None:
 
     _print_technologies(report)
     _print_ports(report)
+    _print_subdomains(report)
     _print_directories(report)
+    _print_api_endpoints(report)
     _print_link_findings(report)
 
     if report.warnings:
@@ -236,6 +307,27 @@ def _print_ports(report) -> None:
     console.print(port_table)
 
 
+def _print_subdomains(report) -> None:
+    console.print(Rule("Subdomains"))
+    if not report.subdomains:
+        console.print("[dim]No subdomains found (or subdomain scan was skipped).[/dim]")
+        return
+    sub_table = _dashed_table()
+    sub_table.add_column("Subdomain")
+    sub_table.add_column("IP")
+    sub_table.add_column("HTTP Status")
+    sub_table.add_column("Title")
+    for s in report.subdomains:
+        sub_table.add_row(
+            s.subdomain,
+            s.ip or "—",
+            str(s.status_code) if s.status_code is not None else "—",
+            (s.title or "—")[:80],
+        )
+    console.print(sub_table)
+    console.print(f"[bold cyan]{len(report.subdomains)} subdomain(s) discovered.[/bold cyan]")
+
+
 def _print_directories(report) -> None:
     console.print(Rule("Directories & Files (active brute-force)"))
     if not report.directories:
@@ -258,6 +350,35 @@ def _print_directories(report) -> None:
     sensitive_count = sum(1 for d in report.directories if d.is_sensitive)
     if sensitive_count:
         console.print(f"[bold red]{sensitive_count} sensitive finding(s) highlighted above.[/bold red]")
+
+
+def _print_api_endpoints(report) -> None:
+    console.print(Rule("API Endpoints & Routes"))
+    if not report.api_endpoints:
+        console.print("[dim]No API endpoints found (or API scan was skipped).[/dim]")
+        return
+    api_table = _dashed_table()
+    api_table.add_column("Path")
+    api_table.add_column("Status")
+    api_table.add_column("Content-Type")
+    api_table.add_column("Size")
+    api_table.add_column("Note")
+    for ep in report.api_endpoints:
+        status_style = ""
+        if ep.status_code in (401, 403):
+            status_style = "yellow"
+        elif ep.status_code >= 500:
+            status_style = "red"
+        status_str = f"[{status_style}]{ep.status_code}[/{status_style}]" if status_style else str(ep.status_code)
+        api_table.add_row(
+            f"/{ep.path}",
+            status_str,
+            ep.content_type or "—",
+            str(ep.size) if ep.size is not None else "—",
+            ep.note or "—",
+        )
+    console.print(api_table)
+    console.print(f"[bold cyan]{len(report.api_endpoints)} API endpoint(s) discovered.[/bold cyan]")
 
 
 def _print_link_findings(report) -> None:
@@ -287,5 +408,14 @@ def _print_link_findings(report) -> None:
         console.print(table)
 
 
+# Intercept help requests to render our custom dashed-table help output.
+import sys
+if any(arg in sys.argv for arg in ("--help", "-h")):
+    if not any("pytest" in arg or "test" in arg for arg in sys.argv):
+        _print_custom_help()
+        sys.exit(0)
+
+
 if __name__ == "__main__":
     app()
+

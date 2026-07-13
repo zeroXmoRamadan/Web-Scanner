@@ -73,3 +73,6 @@ scan.log
 *.sln
 *.swp
 .DS_Store
+
+# Tests
+tests/

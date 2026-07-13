@@ -7,6 +7,7 @@
   :root {
     --critical: #dc2626; --high: #ea580c; --medium: #ca8a04; --low: #16a34a; --unknown: #6b7280;
     --bg: #0f172a; --panel: #1e293b; --text: #e2e8f0; --muted: #94a3b8; --border: #334155;
+    --accent: #3b82f6;
   }
   * { box-sizing: border-box; }
   body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 2rem; }
@@ -31,6 +32,7 @@
   .tech-title { font-weight: 700; font-size: 1.05rem; }
   .tech-meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.5rem; }
   .sensitive-row { background: rgba(220, 38, 38, 0.15); }
+  .auth-row { background: rgba(202, 138, 4, 0.12); }
   .warnings { background: rgba(202, 138, 4, 0.15); border: 1px solid var(--medium); border-radius: 8px; padding: 1rem; }
   .empty { color: var(--muted); font-style: italic; }
   footer { color: var(--muted); font-size: 0.8rem; margin-top: 3rem; }
@@ -50,6 +52,8 @@
   <div class="card"><div class="num" style="color:var(--critical)">{{ severity_counts.CRITICAL }}</div><div class="label">Critical CVEs</div></div>
   <div class="card"><div class="num" style="color:var(--high)">{{ severity_counts.HIGH }}</div><div class="label">High CVEs</div></div>
   <div class="card"><div class="num">{{ report.ports|selectattr("state", "equalto", "open")|list|length }}</div><div class="label">Open Ports</div></div>
+  <div class="card"><div class="num" style="color:var(--accent)">{{ report.subdomains|length }}</div><div class="label">Subdomains Found</div></div>
+  <div class="card"><div class="num" style="color:var(--accent)">{{ report.api_endpoints|length }}</div><div class="label">API Endpoints</div></div>
   <div class="card"><div class="num" style="color:var(--critical)">{{ sensitive_findings|length }}</div><div class="label">Sensitive Findings</div></div>
   <div class="card"><div class="num">{{ report.link_findings|length }}</div><div class="label">Passive Link Findings</div></div>
   <div class="card"><div class="num" style="color:var(--critical)">{{ secret_findings|length }}</div><div class="label">Possible Secrets</div></div>
@@ -115,6 +119,25 @@
 </section>
 
 <section>
+  <h2>Subdomains <span style="color:var(--muted); font-weight:400; font-size:0.8rem;">(DNS enumeration + HTTP probing)</span></h2>
+  {% if not report.subdomains %}
+    <p class="empty">No subdomains found (or subdomain scan was skipped).</p>
+  {% else %}
+  <table>
+    <tr><th>Subdomain</th><th>IP Address</th><th>HTTP Status</th><th>Page Title</th></tr>
+    {% for s in report.subdomains %}
+    <tr>
+      <td>{{ s.subdomain }}</td>
+      <td>{{ s.ip or "—" }}</td>
+      <td>{{ s.status_code if s.status_code is not none else "—" }}</td>
+      <td>{{ s.title or "—" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</section>
+
+<section>
   <h2>Directory &amp; File Findings <span style="color:var(--muted); font-weight:400; font-size:0.8rem;">(active wordlist brute-force)</span></h2>
   {% if not report.directories %}
     <p class="empty">No directories or files found.</p>
@@ -128,6 +151,26 @@
       <td>{{ d.content_type or "—" }}</td>
       <td>{{ d.size if d.size is not none else "—" }}</td>
       <td>{{ d.note or "" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</section>
+
+<section>
+  <h2>API Endpoints &amp; Routes <span style="color:var(--muted); font-weight:400; font-size:0.8rem;">(active wordlist brute-force)</span></h2>
+  {% if not report.api_endpoints %}
+    <p class="empty">No API endpoints found (or API scan was skipped).</p>
+  {% else %}
+  <table>
+    <tr><th>Path</th><th>Status</th><th>Content-Type</th><th>Size</th><th>Note</th></tr>
+    {% for ep in report.api_endpoints %}
+    <tr class="{{ 'auth-row' if ep.status_code in (401, 403) else '' }}">
+      <td>/{{ ep.path }}</td>
+      <td>{{ ep.status_code }}</td>
+      <td>{{ ep.content_type or "—" }}</td>
+      <td>{{ ep.size if ep.size is not none else "—" }}</td>
+      <td>{{ ep.note or "" }}</td>
     </tr>
     {% endfor %}
   </table>

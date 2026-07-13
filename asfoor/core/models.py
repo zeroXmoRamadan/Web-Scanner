@@ -56,6 +56,25 @@ class DirResult:
 
 
 @dataclass
+class SubdomainResult:
+    """A discovered subdomain and its reachability information."""
+    subdomain: str           # e.g. "mail.example.com"
+    ip: Optional[str]        # resolved IP address, or None
+    status_code: Optional[int] = None  # HTTP status if reachable
+    title: Optional[str] = None        # page <title> if reachable
+
+
+@dataclass
+class ApiEndpointResult:
+    """A discovered API endpoint/route."""
+    path: str                # e.g. "api/v1/users"
+    status_code: int
+    content_type: Optional[str] = None
+    size: Optional[int] = None
+    note: Optional[str] = None  # e.g. "Returns JSON", "401 — auth required"
+
+
+@dataclass
 class LinkFinding:
     """A single item extracted by the passive, FindSomething-style link
     finder: a domain, path, URL, static namespace path, IP, email, or a
@@ -84,6 +103,8 @@ class ScanReport:
     technologies: list[TechWithCVEs] = field(default_factory=list)
     ports: list[PortResult] = field(default_factory=list)
     directories: list[DirResult] = field(default_factory=list)
+    subdomains: list[SubdomainResult] = field(default_factory=list)
+    api_endpoints: list[ApiEndpointResult] = field(default_factory=list)
     link_findings: list[LinkFinding] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 

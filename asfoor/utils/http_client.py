@@ -12,4 +12,5 @@ def build_client(timeout_seconds: float = 10, max_redirects: int = 5,
         max_redirects=max_redirects,
         headers={"User-Agent": user_agent},
         verify=False,  # many recon targets use self-signed/misconfigured certs; note this in README
+        limits=httpx.Limits(max_connections=500, max_keepalive_connections=100),
     )
