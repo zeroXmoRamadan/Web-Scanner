@@ -23,6 +23,21 @@ api_scan:
 cve:
   cache_ttl_days: 7
   nvd_base_url: "https://services.nvd.nist.gov/rest/json/cves/2.0"
+  db_path: "data/cve_cache.sqlite3"   # local CVE database path
+  # Rate-limiter / retry settings for NVD API calls (used by cve-sync)
+  retry_max_attempts: 5       # max retries on 429/403
+  retry_base_delay: 1.0       # base delay in seconds for exponential backoff
+  retry_max_delay: 30.0       # cap on computed backoff delay
+  retry_jitter: 0.5           # random jitter added to each backoff delay
+  # Date-range chunking for NVD queries (must be ≤ 120 days, NVD hard limit)
+  chunk_max_days: 90
+  # Incremental sync lookback: how many days back to query on `cve-sync`
+  sync_lookback_days: 24
+
+fingerprint:
+  deep_fingerprint: false     # set to true or use --deep-fingerprint CLI flag
+  # deep fingerprint mode: wappalyzer-next timeout in seconds
+  deep_timeout: 60
 
 output:
   dir: "./output"

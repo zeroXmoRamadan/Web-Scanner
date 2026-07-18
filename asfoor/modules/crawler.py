@@ -272,7 +272,74 @@ async def _run_playwright_crawler(
                         api_endpoints.update(endpoints)
                         
             except Exception as e:
-                logger.warning("Playwright failed to load URL %s: %s", url, e)
+                logger.warning("Playwright failed to load URL %s: %s. Trying HTTPX fallback for this page...", url, e)
+                try:
+                    async with httpx.AsyncClient(
+                        headers={"User-Agent": user_agent},
+                        proxy=proxy_str,
+                        verify=False,
+                        follow_redirects=True,
+                        timeout=10.0
+                    ) as client:
+                        t0 = time.time()
+                        resp_fallback = await client.get(url)
+                        t1 = time.time()
+                        duration = t1 - t0
+                        if resp_fallback.status_code == 200:
+                            html = resp_fallback.text
+                            soup = BeautifulSoup(html, "html.parser")
+
+                            crawl_responses.append(CrawlResponse(
+                                url=url,
+                                method="GET",
+                                status_code=resp_fallback.status_code,
+                                response_time=duration,
+                                body=html,
+                                headers=dict(resp_fallback.headers)
+                            ))
+
+                            # Extract same-origin links
+                            for a in soup.find_all("a", href=True):
+                                link = a["href"]
+                                resolved_link = urljoin(url, link).split("#")[0].rstrip("/")
+                                parsed_link = urlparse(resolved_link)
+                                if parsed_link.netloc == domain:
+                                    if resolved_link not in crawled_urls and resolved_link not in queue:
+                                        queue.append(resolved_link)
+                                elif parsed_link.netloc and parsed_link.netloc != domain:
+                                        external_domains.add(parsed_link.netloc)
+
+                            # Extract Forms
+                            page_forms = _extract_forms(html, url)
+                            forms.extend(page_forms)
+
+                            # Extract scripts
+                            for script in soup.find_all("script"):
+                                src = script.get("src")
+                                if src:
+                                    script_url = urljoin(url, src)
+                                    parsed_src = urlparse(script_url)
+                                    if parsed_src.netloc == domain:
+                                        try:
+                                            script_resp = await client.get(script_url)
+                                            if script_resp.status_code == 200:
+                                                endpoints = _extract_api_endpoints_from_js(script_resp.text)
+                                                api_endpoints.update(endpoints)
+                                                crawl_responses.append(CrawlResponse(
+                                                    url=script_url,
+                                                    method="GET",
+                                                    status_code=200,
+                                                    response_time=1.0,
+                                                    body=script_resp.text,
+                                                    headers=dict(script_resp.headers)
+                                                ))
+                                        except Exception:
+                                            pass
+                                elif script.string:
+                                    endpoints = _extract_api_endpoints_from_js(script.string)
+                                    api_endpoints.update(endpoints)
+                except Exception as fallback_err:
+                    logger.debug("HTTPX fallback also failed for %s: %s", url, fallback_err)
             finally:
                 await context.close()
                 

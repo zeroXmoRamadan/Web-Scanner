@@ -9,7 +9,7 @@ from pathlib import Path
 def setup_logger(output_dir: str = "./output", verbose: bool = False, quiet: bool = False) -> logging.Logger:
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    level = logging.DEBUG if verbose else (logging.ERROR if quiet else logging.WARNING)
+    level = logging.DEBUG if verbose else logging.ERROR
 
     logger = logging.getLogger("asfoor")
     logger.setLevel(logging.DEBUG)

@@ -14,7 +14,8 @@ from typing import Callable, Optional
 
 from asfoor.core.models import ScanReport, TechWithCVEs
 from asfoor.modules.api_scan import scan_api_endpoints
-from asfoor.modules.cve_lookup import lookup_cves
+from asfoor.modules.cve_lookup import lookup_cves, CPE_MAP
+from asfoor.modules.cve_db import init_cve_db, query_cves_for_cpe, is_db_populated
 from asfoor.modules.crawler import crawl_site
 from asfoor.modules.dir_scan import scan_directories
 from asfoor.modules.fingerprint import fingerprint
@@ -25,6 +26,7 @@ from asfoor.modules.link_finder import find_links
 from asfoor.modules.port_scan import scan_ports
 from asfoor.modules.subdomain_scan import scan_subdomains
 from asfoor.utils.validators import resolve_ip
+from asfoor.core.models import CVEEntry
 
 logger = logging.getLogger("asfoor.orchestrator")
 
@@ -57,6 +59,7 @@ async def run_scan(domain: str, config: dict,
                     subdomains_wordlist_path: Path | None = None,
                     api_wordlist_path: Path | None = None,
                     wordlist_size: str = "small",
+                    deep_fingerprint: bool = False,
                     on_phase: Optional[PhaseCallback] = None) -> ScanReport:
     notify = on_phase or _noop_notify
 
@@ -70,7 +73,11 @@ async def run_scan(domain: str, config: dict,
 
     # All phases below are independent of each other and run concurrently.
     tasks = {}
-    tasks["fingerprint"] = _run_phase("technology fingerprinting", fingerprint(domain, config), notify)
+    tasks["fingerprint"] = _run_phase(
+        "technology fingerprinting",
+        fingerprint(domain, config, deep_fingerprint=deep_fingerprint),
+        notify,
+    )
 
     if not skip_crawler:
         tasks["crawler"] = _run_phase("web crawling", crawl_site(domain, config, ignore_robots=ignore_robots), notify)
@@ -176,10 +183,40 @@ async def run_scan(domain: str, config: dict,
             warnings.extend(port_warnings)
 
     # CVE lookup depends on fingerprint results, so it runs after the phases above.
+    # Uses the local CVE database as the primary data source — never calls the
+    # live NVD API during a scan run.
     tech_with_cves = []
     if not skip_cve and technologies:
         try:
-            tech_with_cves = await _run_phase("CVE lookup", lookup_cves(technologies, config), notify)
+            cve_cfg = config.get("cve", {})
+            db_path_str = cve_cfg.get("db_path")
+            if db_path_str:
+                from pathlib import Path as _Path
+                cve_db_path = _Path(db_path_str)
+            else:
+                cve_db_path = Path(__file__).resolve().parents[2] / "data" / "cve_cache.sqlite3"
+
+            cve_conn = init_cve_db(cve_db_path)
+            db_populated = is_db_populated(cve_conn)
+
+            if not db_populated:
+                warnings.append(
+                    "CVE database is empty. Run '3asfoor cve-sync --full' to populate it. "
+                    "CVE matching is disabled for this scan."
+                )
+                tech_with_cves = [TechWithCVEs(technology=t, cves=[]) for t in technologies]
+            else:
+                notify("CVE lookup", "start", "")
+                for tech in technologies:
+                    if not tech.version or tech.name not in CPE_MAP:
+                        tech_with_cves.append(TechWithCVEs(technology=tech, cves=[]))
+                        continue
+                    vendor, product = CPE_MAP[tech.name]
+                    cves = query_cves_for_cpe(cve_conn, vendor, product)
+                    tech_with_cves.append(TechWithCVEs(technology=tech, cves=cves))
+                notify("CVE lookup", "done", "")
+
+            cve_conn.close()
         except Exception as e:
             warnings.append(f"CVE lookup failed: {e}")
             tech_with_cves = [TechWithCVEs(technology=t, cves=[]) for t in technologies]

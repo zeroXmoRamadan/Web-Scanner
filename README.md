@@ -4,8 +4,8 @@
 
 A CLI tool that, given only a domain, performs comprehensive web reconnaissance:
 
-- **Technology fingerprinting** — powered by [Wappalyzer](https://github.com/chorsley/python-Wappalyzer) (1270+ technology signatures): CMS, frameworks, servers, JS libraries, and their versions
-- **Known CVEs** for detected technologies (via the NVD API, with SQLite caching)
+- **Technology fingerprinting** — powered by [wappalyzer-next](https://pypi.org/project/wappalyzer/) (1400+ technology signatures): CMS, frameworks, servers, JS libraries, and their versions. Default mode is HTTP-only (no browser needed); optional `--deep-fingerprint` adds JS-aware detection via headless Chromium.
+- **Known CVEs** for detected technologies — scan-time queries hit a **local SQLite database** only (no live API calls during scans). Populate/update with `3asfoor cve-sync`.
 - **Open ports & services** (via nmap, with a fallback TCP connect scan)
 - **Directory & sensitive file discovery** — active wordlist brute-force with soft-404 detection (config backups, `.env`, `.git`, exposed keys, etc.)
 - **Subdomain enumeration** — DNS resolution + HTTP probing
@@ -54,6 +54,34 @@ export NVD_API_KEY="your-key-here"
 ```powershell
 $env:NVD_API_KEY="your-key-here"
 ```
+
+## CVE Database Sync
+
+CVE matching during scans uses a **local SQLite database** — no live NVD API calls are made during `scan` runs. You must populate the database before CVE matching will work:
+
+```bash
+# Full historical backfill (first time — takes several hours without an API key)
+3asfoor cve-sync --full
+
+# Incremental update (run regularly — covers the last 24 days by default)
+3asfoor cve-sync
+```
+
+**Recommended cron job** (daily at 3 AM):
+
+```bash
+0 3 * * * cd /path/to/3asfoor && 3asfoor cve-sync
+```
+
+Options:
+- `--full` — full historical backfill (from 2002 to now). Automatically partitions queries by publication date (`pubStartDate` / `pubEndDate`) to ensure all historical records are retrieved. If interrupted, re-running `cve-sync --full` resumes from the last completed date chunk. **Known limitation:** an interrupted chunk is re-fetched from the beginning of that chunk rather than resuming mid-pagination.
+- Without `--full` (Incremental) — incremental sync covering the last N days (default 24). Automatically partitions queries by modification date (`lastModStartDate` / `lastModEndDate`) to catch all new publications and recent revisions.
+- `--cve-db-path <path>` — custom path for the CVE database file (default: `data/cve_cache.sqlite3`)
+- `--verbose` / `--quiet` — control output verbosity
+
+> **⚠️ Migration note for existing users:** The new two-table CVE database schema (`cve_records` + `cve_cpe_matches`) is incompatible with the old `cve_cache` table. The obsolete table is dropped automatically during database initialization, but it is recommended to delete any old database file (`data/cve_cache.sqlite3`) before running `3asfoor cve-sync --full` for a clean backfill.
+
+The `cve-sync` command does **not** require `--i-have-permission` since it only contacts the NVD public API, not any scan target.
 
 ## Usage
 
@@ -138,6 +166,13 @@ Below is the complete list of CLI arguments, options, and flags available when r
 - **`--skip-links`** — Skip passive FindSomething-style link, path, and secret extraction.
 - **`--skip-cve`** — Skip checking technology versions against NVD CVE database.
 
+### CVE & Fingerprinting Options
+
+- **`--cve-db-path <path>`** (Option)  
+  Path to a custom CVE database file (default: `data/cve_cache.sqlite3`).
+- **`--deep-fingerprint`** (Flag)  
+  Run a full JS-aware fingerprint pass using wappalyzer-next's browser engine (Playwright + Chromium). Detects JS-framework technologies (React, Vue.js, Angular, Next.js, etc.) that require runtime DOM inspection. **⚠️ Passivity caveat:** this makes a browser-based request to the target which may trigger WAF alerts or logging. Requires Chromium: `python -m playwright install chromium`.
+
 ### Reports & Export Controls
 
 - **`--export / --no-export`** (Option)  
@@ -178,17 +213,32 @@ writes to `./output/` by default:
 
 ### Technology Fingerprinting (`fingerprint.py`)
 
-Powered by [python-Wappalyzer](https://github.com/chorsley/python-Wappalyzer) — a community-maintained
-signature database with **1270+ technology definitions**. Detects CMS platforms, web frameworks,
-JavaScript libraries, analytics tools, CDNs, web servers, and more from HTTP headers, cookies,
-meta tags, script references, and HTML patterns.
+Powered by [wappalyzer-next](https://pypi.org/project/wappalyzer/) — a modern Wappalyzer
+engine with **1400+ technology definitions**. Detects CMS platforms, web frameworks,
+JavaScript libraries, analytics tools, CDNs, web servers, and more.
 
-The module constructs a Wappalyzer `WebPage` from the already-fetched httpx response (no duplicate
-HTTP request) and returns technology names, versions, categories, and confidence scores.
+Two scan modes are available:
 
-> **Python 3.12–3.14+ Compatibility:** The tool includes a built-in compatibility shim
-> (`asfoor/utils/wappalyzer_compat.py`) that transparently handles the `pkg_resources` removal
-> in modern Python/setuptools. No manual patching of any installed packages is required.
+| Mode | Flag | How it works | Browser needed? |
+|---|---|---|---|
+| **Fast** (default) | _(none)_ | HTTP-only analysis: headers, HTML, meta tags, scripts, DNS, robots.txt | No |
+| **Full** | `--deep-fingerprint` | Browser-based JS-aware analysis via Playwright + Chromium | Yes |
+
+The fast mode is sufficient for most scans. The full mode additionally detects JS-framework
+technologies that require runtime DOM inspection (React, Vue.js, Angular rendered apps,
+Next.js, etc.).
+
+#### Enabling `--deep-fingerprint`
+
+Install Chromium for Playwright:
+
+```bash
+python -m playwright install chromium
+```
+
+> **⚠️ Passivity caveat:** The `--deep-fingerprint` mode makes a **browser-based request**
+> to the target which executes JavaScript. This may trigger WAF alerts, be logged separately,
+> or cause side effects not caused by the default HTTP-only scan.
 
 ### Subdomain Enumeration (`subdomain_scan.py`)
 
@@ -201,6 +251,13 @@ HTTP status, and `<title>` tag. Concurrency auto-scales with `--wordlist-size`.
 Brute-forces common API paths (`/api/v1/users`, `/graphql`, `/health`, etc.) from the bundled
 SecLists, with built-in soft-404 detection to filter false positives. Reports status code,
 content type, response size, and a human-readable note. Concurrency auto-scales with `--wordlist-size`.
+
+### Web Crawler & sitemap builder (`crawler.py`)
+
+A dynamic web crawling and API discovery module. It traverses same-origin links to index sitemap paths and logs all page layouts.
+* **JS-Aware Crawling**: Uses Playwright's headless browser by default to render client-side scripts, capture dynamic link generation, and catalog form inputs (strictly defensively, without submissions).
+* **Page-Level HTTPX Fallback**: If Playwright fails to load a URL (e.g. due to connection closed/reset by a WAF or anti-bot system), the crawler automatically falls back to fetching the page statically via HTTPX and parsing it with BeautifulSoup to ensure maximum coverage.
+* **API Interception**: Intercepts fetch/XHR requests at runtime in the browser context and scans script sources (`.js` files) to extract hidden endpoints.
 
 ### Directory & Sensitive File Discovery (`dir_scan.py`)
 
@@ -362,7 +419,7 @@ You can override any wordlist with `--wordlist <path>` (or `--dir-wordlist <path
 │   ├── modules/               # fingerprint, cve_lookup, port_scan, dir_scan,
 │   │                          #   subdomain_scan, api_scan, link_finder, report
 │   ├── utils/                 # http client, rate limiter, logger, banner,
-│   │                          #   validators, wordlist utils, wappalyzer compat
+│   │                          #   validators, wordlist utils
 │   └── templates/             # HTML report template
 ├── config/                    # YAML config (defaults.yaml)
 ├── data/                      # runtime cache (cve_cache.sqlite3)
@@ -376,15 +433,14 @@ You can override any wordlist with `--wordlist <path>` (or `--dir-wordlist <path
 |---|---|
 | `httpx` | Async HTTP client |
 | `typer` + `rich` | CLI framework + colored tables |
-| `python-Wappalyzer` | Technology fingerprinting engine (1270+ signatures) |
-| `setuptools` | Provides `pkg_resources` for Wappalyzer compatibility |
+| `wappalyzer` | Technology fingerprinting engine — wappalyzer-next (1400+ signatures) |
 | `pyyaml` | Config file parsing |
 | `jinja2` | HTML report templating |
 | `python-nmap` | nmap integration for port scanning |
 
 ## Notes / Limitations
 
-- Technology detection is powered by Wappalyzer's 1270+ signature database — no manual
+- Technology detection is powered by wappalyzer-next's 1400+ signature database — no manual
   signature maintenance needed.
 - CVE matching relies on a hand-maintained CPE vendor/product map (`cve_lookup.py`); add
   entries there for any new technology not covered.

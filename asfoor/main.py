@@ -2,10 +2,13 @@
 
 Usage:
     3asfoor scan example.com --i-have-permission
+    3asfoor cve-sync          # incremental sync (last 24 days)
+    3asfoor cve-sync --full   # full historical backfill
 """
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -82,6 +85,10 @@ def _print_custom_help() -> None:
     opts_table.add_row("--skip-api", "FLAG", "Skip API endpoint discovery.")
     opts_table.add_row("--skip-links", "FLAG", "Skip passive FindSomething-style link/secret finder.")
     opts_table.add_row("--skip-cve", "FLAG", "Skip CVE lookups.")
+    opts_table.add_row("--skip-crawler", "FLAG", "Skip the web crawler module.")
+    opts_table.add_row("--ignore-robots", "FLAG", "Ignore robots.txt rules when crawling.")
+    opts_table.add_row("--cve-db-path", "TEXT", "Path to a custom CVE database file (default: data/cve_cache.sqlite3).")
+    opts_table.add_row("--deep-fingerprint", "FLAG", "Run JS-aware fingerprint pass via wappalyzer-next (requires Chromium).")
     opts_table.add_row("--export / --no-export", "FLAG/OPT", "Write report files (.json, .html, findings.txt) to output directory.")
     opts_table.add_row("--format", "TEXT", "Report output format: 'json', 'html', or 'both' (default: both).")
     opts_table.add_row("--output-dir", "TEXT", "Specify custom output directory where reports are saved (default: ./output).")
@@ -126,6 +133,8 @@ def scan(
     skip_cve: bool = typer.Option(False, "--skip-cve", help="Skip CVE lookups."),
     skip_crawler: bool = typer.Option(False, "--skip-crawler", help="Skip the web crawler module."),
     ignore_robots: bool = typer.Option(False, "--ignore-robots", help="Ignore robots.txt rules when crawling."),
+    cve_db_path: Optional[str] = typer.Option(None, "--cve-db-path", help="Path to a custom CVE database file (default: data/cve_cache.sqlite3)."),
+    deep_fingerprint: bool = typer.Option(False, "--deep-fingerprint", help="Run an additional JS-aware fingerprint pass via wappalyzer-next (requires Chromium). Makes a browser-based request to the target."),
     export: Optional[bool] = typer.Option(
         None, "--export/--no-export",
         help="Write JSON/HTML/findings.txt report files to --output-dir. If omitted, you'll be "
@@ -166,6 +175,7 @@ def scan(
         "output.format": fmt,
         "dir_scan.concurrency": concurrency,
         "dir_scan.rate_limit_seconds": rate_limit,
+        "cve.db_path": cve_db_path,
     }
     config = merge_overrides(config, overrides)
 
@@ -201,6 +211,7 @@ def scan(
         dirs_wordlist_path=dirs_wordlist_path, sensitive_wordlist_path=sensitive_wordlist_path,
         subdomains_wordlist_path=subdomains_wordlist_path, api_wordlist_path=api_wordlist_path,
         wordlist_size=wordlist_size,
+        deep_fingerprint=deep_fingerprint,
         on_phase=on_phase,
     ))
 
@@ -486,6 +497,163 @@ def _print_findings(report) -> None:
     console.print(findings_table)
 
 
+# ---------------------------------------------------------------------------
+# cve-sync subcommand
+# ---------------------------------------------------------------------------
+
+
+@app.command("cve-sync")
+def cve_sync(
+    full: bool = typer.Option(False, "--full", help="Run a full historical backfill instead of an incremental sync."),
+    cve_db_path: Optional[str] = typer.Option(None, "--cve-db-path", help="Path to a custom CVE database file."),
+    verbose: bool = typer.Option(False, "--verbose"),
+    quiet: bool = typer.Option(False, "--quiet"),
+):
+    """Sync the local CVE database from the NVD API.
+
+    Without --full, performs an incremental sync covering the last N days
+    (default 24, configurable via config.yaml cve.sync_lookback_days).
+
+    With --full, performs a complete historical backfill.  This can take
+    several hours depending on your API key status.  If interrupted, re-running
+    ``cve-sync --full`` will resume from the last completed date chunk (note:
+    an interrupted chunk is re-fetched from the beginning of that chunk rather
+    than resuming mid-pagination — this is a known limitation).
+    """
+    import os
+    import httpx
+    from asfoor.modules.cve_db import (
+        init_cve_db, upsert_cve_records, parse_nvd_cve_item,
+        record_sync_start, update_sync_progress, complete_sync,
+        get_last_full_sync_progress, get_last_sync_time,
+    )
+    from asfoor.utils.nvd_rate_limiter import NvdTokenBucket, nvd_request_with_retry
+    from asfoor.utils.date_chunking import chunk_date_range
+
+    if not quiet:
+        print_banner(console)
+    logger = setup_logger(output_dir="./output", verbose=verbose, quiet=quiet)
+
+    config = load_config()
+    cve_cfg = config.get("cve", {})
+    base_url = cve_cfg.get("nvd_base_url", "https://services.nvd.nist.gov/rest/json/cves/2.0")
+    max_days = cve_cfg.get("chunk_max_days", 90)
+    lookback_days = cve_cfg.get("sync_lookback_days", 24)
+    db_file = Path(cve_db_path or cve_cfg.get("db_path", "data/cve_cache.sqlite3"))
+
+    api_key = os.environ.get("NVD_API_KEY")
+    retry_cfg = {
+        "max_retries": cve_cfg.get("retry_max_attempts", 5),
+        "base_delay": cve_cfg.get("retry_base_delay", 1.0),
+        "max_delay": cve_cfg.get("retry_max_delay", 30.0),
+        "jitter": cve_cfg.get("retry_jitter", 0.5),
+    }
+
+    conn = init_cve_db(db_file)
+    bucket = NvdTokenBucket(has_api_key=bool(api_key))
+
+    from datetime import timezone
+    if full:
+        sync_type = "full"
+        # NVD data starts around 1999; use 2002 as a practical start.
+        range_start = datetime(2002, 1, 1)
+        range_end = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        # Check for a resumable in-progress sync.
+        resume_point = get_last_full_sync_progress(conn)
+        if resume_point:
+            try:
+                range_start = datetime.fromisoformat(resume_point.replace("Z", "+00:00")).replace(tzinfo=None)
+                console.print(f"[yellow]Resuming full sync from {range_start.isoformat()}[/yellow]")
+            except (ValueError, AttributeError):
+                pass
+    else:
+        sync_type = "incremental"
+        last_sync = get_last_sync_time(conn)
+        if last_sync:
+            range_start = last_sync.replace(tzinfo=None) - timedelta(days=1)  # small overlap for safety
+        else:
+            range_start = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=lookback_days)
+        range_end = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    chunks = chunk_date_range(range_start, range_end, max_days=max_days)
+    console.print(
+        f"[bold cyan]CVE {sync_type} sync: {len(chunks)} chunk(s), "
+        f"{range_start.date()} → {range_end.date()}[/bold cyan]"
+    )
+
+    sync_id = record_sync_start(conn, sync_type)
+    total_upserted = 0
+
+    async def _do_sync():
+        nonlocal total_upserted
+        headers = {"apiKey": api_key} if api_key else {}
+
+        async with httpx.AsyncClient() as client:
+            for chunk_idx, (chunk_start, chunk_end) in enumerate(chunks, 1):
+                start_str = chunk_start.strftime("%Y-%m-%dT%H:%M:%S.000")
+                end_str = chunk_end.strftime("%Y-%m-%dT%H:%M:%S.000")
+
+                if not quiet:
+                    console.print(
+                        f"  [dim]Chunk {chunk_idx}/{len(chunks)}: "
+                        f"{chunk_start.date()} → {chunk_end.date()}[/dim]"
+                    )
+
+                start_index = 0
+                while True:
+                    start_param = "pubStartDate" if full else "lastModStartDate"
+                    end_param = "pubEndDate" if full else "lastModEndDate"
+                    params = {
+                        start_param: start_str,
+                        end_param: end_str,
+                        "resultsPerPage": 2000,
+                        "startIndex": start_index,
+                    }
+
+                    resp = await nvd_request_with_retry(
+                        client, base_url, params=params, headers=headers,
+                        bucket=bucket, **retry_cfg,
+                    )
+                    if resp is None:
+                        console.print(
+                            f"  [yellow]Warning: failed to fetch chunk "
+                            f"{chunk_idx} page at startIndex={start_index} "
+                            f"— skipping remainder of this chunk.[/yellow]"
+                        )
+                        break
+
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        console.print(f"  [yellow]Warning: invalid JSON response for chunk {chunk_idx}[/yellow]")
+                        break
+
+                    vulns = data.get("vulnerabilities", [])
+                    if not vulns:
+                        break
+
+                    records = [parse_nvd_cve_item(v) for v in vulns]
+                    upserted = upsert_cve_records(conn, records)
+                    total_upserted += upserted
+
+                    total_results = data.get("totalResults", 0)
+                    start_index += len(vulns)
+                    if start_index >= total_results:
+                        break
+
+                update_sync_progress(conn, sync_id, end_str)
+
+    asyncio.run(_do_sync())
+    complete_sync(conn, sync_id)
+    conn.close()
+
+    console.print(
+        f"\n[bold green]CVE sync complete:[/bold green] "
+        f"{total_upserted} record(s) upserted into {db_file}"
+    )
+
+
 # Intercept help requests to render our custom dashed-table help output.
 import sys
 if any(arg in sys.argv for arg in ("--help", "-h")):
@@ -496,4 +664,3 @@ if any(arg in sys.argv for arg in ("--help", "-h")):
 
 if __name__ == "__main__":
     app()
-

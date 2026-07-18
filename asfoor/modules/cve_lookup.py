@@ -1,6 +1,9 @@
 """Looks up CVEs for detected technologies via the NVD API 2.0, with a local
 SQLite cache to avoid re-querying and to respect NVD's rate limits
 (5 req/30s unauthenticated, 50 req/30s with an API key).
+
+Uses the proactive token-bucket rate limiter and exponential-backoff retry
+helper from ``asfoor.utils.nvd_rate_limiter``.
 """
 from __future__ import annotations
 
@@ -16,6 +19,7 @@ from pathlib import Path
 import httpx
 
 from asfoor.core.models import CVEEntry, Technology, TechWithCVEs
+from asfoor.utils.nvd_rate_limiter import NvdTokenBucket, nvd_request_with_retry
 
 logger = logging.getLogger("asfoor.cve_lookup")
 
@@ -117,18 +121,49 @@ def _severity_from_score(score: float | None) -> str | None:
     return "LOW"
 
 
-async def _query_nvd(client: httpx.AsyncClient, base_url: str, vendor: str, product: str,
-                      version: str, api_key: str | None) -> list[CVEEntry]:
+async def _query_nvd(
+    client: httpx.AsyncClient,
+    base_url: str,
+    vendor: str,
+    product: str,
+    version: str,
+    api_key: str | None,
+    bucket: NvdTokenBucket | None = None,
+    retry_cfg: dict | None = None,
+) -> tuple[list[CVEEntry], str | None]:
+    """Query NVD API for CVEs matching a CPE string.
+
+    Returns ``(entries, warning)`` — *warning* is ``None`` on success or a
+    descriptive string when the lookup failed after all retries.
+    """
     cpe_string = f"cpe:2.3:a:{vendor}:{product}:{version}:*:*:*:*:*:*:*"
     headers = {"apiKey": api_key} if api_key else {}
     params = {"cpeName": cpe_string, "resultsPerPage": 50}
 
+    cfg = retry_cfg or {}
+    resp = await nvd_request_with_retry(
+        client,
+        base_url,
+        params=params,
+        headers=headers,
+        bucket=bucket,
+        max_retries=cfg.get("max_attempts", 5),
+        base_delay=cfg.get("base_delay", 1.0),
+        max_delay=cfg.get("max_delay", 30.0),
+        jitter=cfg.get("jitter", 0.5),
+    )
+
+    if resp is None:
+        warning = f"CVE lookup failed for {cpe_string}: retries exhausted"
+        logger.warning(warning)
+        return [], warning
+
     try:
-        resp = await client.get(base_url, params=params, headers=headers, timeout=20)
         resp.raise_for_status()
-    except httpx.HTTPError as e:
-        logger.warning("NVD query failed for %s: %s", cpe_string, e)
-        return []
+    except httpx.HTTPStatusError as e:
+        warning = f"CVE lookup failed for {cpe_string}: {e}"
+        logger.warning(warning)
+        return [], warning
 
     data = resp.json()
     entries: list[CVEEntry] = []
@@ -149,22 +184,35 @@ async def _query_nvd(client: httpx.AsyncClient, base_url: str, vendor: str, prod
         ))
 
     entries.sort(key=lambda e: (e.score or 0), reverse=True)
-    return entries
+    return entries, None
 
 
 async def lookup_cves(technologies: list[Technology], config: dict,
                        cache_path: Path | None = None) -> list[TechWithCVEs]:
-    """For each technology with a known version, look up CVEs via NVD (cache-first)."""
+    """For each technology with a known version, look up CVEs via NVD (cache-first).
+
+    Uses a proactive token-bucket rate limiter to stay within NVD's request
+    budget, with exponential-backoff retry as a fallback for 429/403 edges.
+    Failed lookups are reported as warnings in the returned results rather
+    than aborting the entire scan.
+    """
     cve_cfg = config.get("cve", {})
     base_url = cve_cfg.get("nvd_base_url", "https://services.nvd.nist.gov/rest/json/cves/2.0")
     ttl_days = cve_cfg.get("cache_ttl_days", 7)
     api_key = os.environ.get("NVD_API_KEY")
 
+    retry_cfg = {
+        "max_attempts": cve_cfg.get("retry_max_attempts", 5),
+        "base_delay": cve_cfg.get("retry_base_delay", 1.0),
+        "max_delay": cve_cfg.get("retry_max_delay", 30.0),
+        "jitter": cve_cfg.get("retry_jitter", 0.5),
+    }
+
     conn = _init_cache(cache_path or DEFAULT_CACHE_PATH)
     results: list[TechWithCVEs] = []
+    warnings: list[str] = []
 
-    # NVD rate limit: without a key, keep requests conservative (1 every ~6s).
-    request_delay = 1.2 if api_key else 6.0
+    bucket = NvdTokenBucket(has_api_key=bool(api_key))
 
     async with httpx.AsyncClient() as client:
         for tech in technologies:
@@ -185,7 +233,13 @@ async def lookup_cves(technologies: list[Technology], config: dict,
                 results.append(TechWithCVEs(technology=tech, cves=cached))
                 continue
 
-            entries = await _query_nvd(client, base_url, vendor, product, tech.version, api_key)
+            entries, warning = await _query_nvd(
+                client, base_url, vendor, product, tech.version, api_key,
+                bucket=bucket, retry_cfg=retry_cfg,
+            )
+            if warning:
+                warnings.append(warning)
+
             if not entries:
                 # Local match fallback rules
                 offline_cves = {
@@ -228,8 +282,6 @@ async def lookup_cves(technologies: list[Technology], config: dict,
 
             _cache_set(conn, cpe_key, entries)
             results.append(TechWithCVEs(technology=tech, cves=entries))
-
-            await asyncio.sleep(request_delay)
 
     conn.close()
     return results
